@@ -92,25 +92,45 @@ HTML_TEMPLATE = '''
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>NetMonitor - Vercel Edition</title>
+    <title>Monitor PRODED - Network Intelligence</title>
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
     <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.10.0/font/bootstrap-icons.css">
     <style>
-        body { background-color: #f8f9fa; font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; }
-        .status-dot { height: 15px; width: 15px; border-radius: 50%; display: inline-block; margin-right: 10px; }
-        .online { background-color: #28a745; box-shadow: 0 0 8px #28a745; }
-        .offline { background-color: #dc3545; box-shadow: 0 0 8px #dc3545; }
-        .card { border: none; border-radius: 15px; box-shadow: 0 4px 6px rgba(0,0,0,0.1); transition: transform 0.2s; }
-        .card:hover { transform: translateY(-5px); }
-        .navbar { background: linear-gradient(90deg, #2c3e50, #000000); }
-        #speedtest-result { font-size: 1.2rem; font-weight: bold; }
+        body { background-color: #f8fafc; font-family: 'Inter', system-ui, -apple-system, sans-serif; color: #0f172a; }
+        .status-dot { height: 12px; width: 12px; border-radius: 50%; display: inline-block; margin-right: 8px; }
+        .online { background-color: #22c55e; box-shadow: 0 0 8px rgba(34, 197, 94, 0.6); }
+        .offline { background-color: #ef4444; box-shadow: 0 0 8px rgba(239, 68, 68, 0.6); }
+        .card { border: 1px solid #f1f5f9; border-radius: 16px; box-shadow: 0 1px 3px rgba(0,0,0,0.05); transition: all 0.3s ease; background: white; }
+        .card:hover { transform: translateY(-2px); box-shadow: 0 10px 15px -3px rgba(0,0,0,0.1); }
+        .navbar { background-color: white; border-bottom: 4px solid #0ea5e9; box-shadow: 0 4px 6px -1px rgba(0,0,0,0.1); }
+        .nav-brand-text { font-weight: 900; letter-spacing: -0.05em; color: #1e293b; }
+        .nav-brand-highlight { color: #0ea5e9; }
+        .btn-primary { background-color: #0ea5e9; border: none; font-weight: 600; border-radius: 8px; }
+        .btn-primary:hover { background-color: #0284c7; }
+        .table { --bs-table-hover-bg: #f8fafc; }
+        code { background-color: #f1f5f9; color: #0369a1; padding: 0.2rem 0.4rem; border-radius: 4px; font-weight: 500; }
     </style>
 </head>
 <body>
 
-<nav class="navbar navbar-dark mb-4">
+<nav class="navbar navbar-light py-3 mb-4">
     <div class="container">
-        <span class="navbar-brand mb-0 h1"><i class="bi bi-activity me-2"></i>NetMonitor Pro</span>
+        <div class="d-flex align-items-center">
+            <div class="bg-sky-500 p-2 rounded-3 me-3" style="background-color: #0ea5e9;">
+                <i class="bi bi-activity text-white fs-4"></i>
+            </div>
+            <div>
+                <span class="navbar-brand mb-0 h1 nav-brand-text fs-2">MONITOR <span class="nav-brand-highlight">PRODED</span></span>
+                <div class="text-muted fw-bold text-uppercase" style="font-size: 10px; letter-spacing: 0.1em; margin-top: -5px;">Network Intelligence</div>
+            </div>
+        </div>
+        <div class="d-none d-md-block text-end">
+            <div class="text-muted fw-bold text-uppercase" style="font-size: 10px;">Status do Sistema</div>
+            <div class="d-flex align-items-center justify-content-end">
+                <div class="bg-success rounded-circle me-2 animate-pulse" style="width: 8px; height: 8px; background-color: #22c55e;"></div>
+                <span class="text-success fw-bold text-uppercase" style="font-size: 10px;">Operacional</span>
+            </div>
+        </div>
     </div>
 </nav>
 
@@ -143,26 +163,23 @@ HTML_TEMPLATE = '''
             </div>
         </div>
 
-        <!-- Ferramentas Laterais -->
+        <!-- Histórico de Perdas (Substituindo MikroTik para alinhar com a nova versão) -->
         <div class="col-md-4">
+            <div class="card p-4 mb-4">
+                <h5><i class="bi bi-clock-history me-2 text-warning"></i>Histórico de Eventos</h5>
+                <p class="text-muted small">Logs recentes de conectividade</p>
+                <div id="event-logs" style="max-height: 300px; overflow-y: auto;">
+                    <p class="text-muted small italic">Nenhum evento registrado.</p>
+                </div>
+            </div>
+
             <!-- Speedtest -->
             <div class="card p-4 mb-4 text-center">
-                <h5><i class="bi bi-speedometer2 me-2"></i>Speedtest Server</h5>
+                <h5><i class="bi bi-speedometer2 me-2 text-primary"></i>Speedtest Server</h5>
                 <p class="text-muted small">Mede a velocidade do servidor Vercel</p>
                 <button id="btn-speedtest" class="btn btn-outline-dark w-100 mb-3">Iniciar Teste</button>
                 <div id="speedtest-loading" class="spinner-border text-primary d-none" role="status"></div>
                 <div id="speedtest-result" class="mt-2"></div>
-            </div>
-
-            <!-- MikroTik Placeholder -->
-            <div class="card p-4">
-                <h5><i class="bi bi-router me-2"></i>MikroTik API</h5>
-                <div class="mb-3">
-                    <input type="text" class="form-control mb-2" placeholder="IP do MikroTik">
-                    <input type="password" class="form-control mb-2" placeholder="API Password">
-                    <button class="btn btn-success btn-sm w-100" onclick="alert('Funcionalidade MikroTik será implementada no futuro!')">Configurar</button>
-                </div>
-                <p class="text-muted x-small" style="font-size: 0.8rem;">Integração futura via RouterOS API.</p>
             </div>
         </div>
     </div>
@@ -206,23 +223,40 @@ HTML_TEMPLATE = '''
 
 <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
 <script>
+    let lastStatus = {};
+
     async function fetchStatus() {
         try {
             const response = await fetch('/api/status');
             const data = await response.json();
             const list = document.getElementById('ip-list');
+            const logs = document.getElementById('event-logs');
             list.innerHTML = '';
+            
             data.forEach(item => {
+                // Log status changes
+                if (lastStatus[item.ip] && lastStatus[item.ip] !== item.status) {
+                    const time = new Date().toLocaleTimeString();
+                    const logItem = document.createElement('div');
+                    logItem.className = `alert ${item.status === 'online' ? 'alert-success' : 'alert-danger'} py-1 px-2 mb-2 small`;
+                    logItem.style.fontSize = '11px';
+                    logItem.innerHTML = `<strong>${time}</strong>: ${item.label} ficou ${item.status.toUpperCase()}`;
+                    
+                    if (logs.querySelector('p')) logs.innerHTML = '';
+                    logs.insertBefore(logItem, logs.firstChild);
+                }
+                lastStatus[item.ip] = item.status;
+
                 list.innerHTML += `
                     <tr>
                         <td><code>${item.ip}</code></td>
                         <td>${item.label}</td>
                         <td>
                             <span class="status-dot ${item.status}"></span>
-                            ${item.status.toUpperCase()}
+                            <span class="fw-bold ${item.status === 'online' ? 'text-success' : 'text-danger'}">${item.status.toUpperCase()}</span>
                         </td>
                         <td>
-                            <button class="btn btn-sm btn-outline-primary" onclick="runTraceroute('${item.ip}')">
+                            <button class="btn btn-sm btn-outline-sky" style="border-color: #0ea5e9; color: #0ea5e9;" onclick="runTraceroute('${item.ip}')">
                                 <i class="bi bi-signpost-split"></i> Trace
                             </button>
                         </td>
