@@ -118,33 +118,40 @@ HTML_TEMPLATE = '''
     <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.10.0/font/bootstrap-icons.css">
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
     <style>
-        body { background-color: #f8fafc; font-family: 'Inter', sans-serif; color: #1e293b; padding-top: 2rem; }
-        .card { border: 1px solid #e2e8f0; border-radius: 12px; box-shadow: 0 1px 3px rgba(0,0,0,0.05); background: white; margin-bottom: 2rem; }
-        .card-header { background: white; border-bottom: 1px solid #f1f5f9; padding: 1.5rem; display: flex; justify-content: space-between; align-items: center; }
-        .card-header h5 { margin: 0; font-weight: 700; font-size: 1.1rem; display: flex; align-items: center; }
-        .card-header h5 i { color: #0ea5e9; margin-right: 12px; }
+        body { background-color: #f8fafc; font-family: 'Inter', sans-serif; color: #1e293b; padding-top: 1rem; }
+        .card { border: 1px solid #e2e8f0; border-radius: 12px; box-shadow: 0 1px 3px rgba(0,0,0,0.05); background: white; margin-bottom: 1.5rem; }
+        .card-header { background: white; border-bottom: 1px solid #f1f5f9; padding: 1rem 1.5rem; display: flex; justify-content: space-between; align-items: center; }
+        .card-header h5 { margin: 0; font-weight: 700; font-size: 1rem; display: flex; align-items: center; }
+        .card-header h5 i { color: #0ea5e9; margin-right: 10px; }
         
+        /* Header Branding */
+        .branding { display: flex; align-items: center; margin-bottom: 1.5rem; padding: 0 0.5rem; }
+        .branding-logo { background: #0ea5e9; color: white; padding: 8px; border-radius: 10px; margin-right: 12px; display: flex; align-items: center; justify-content: center; }
+        .branding-text h1 { font-size: 1.25rem; font-weight: 800; margin: 0; line-height: 1; letter-spacing: -0.02em; }
+        .branding-text h1 span { color: #0ea5e9; }
+        .branding-text p { font-size: 0.65rem; font-weight: 700; color: #94a3b8; text-transform: uppercase; letter-spacing: 0.1em; margin: 0; }
+
         .table { margin-bottom: 0; }
-        .table th { background: #f8fafc; color: #64748b; font-size: 0.7rem; font-weight: 700; text-transform: uppercase; letter-spacing: 0.05em; padding: 1rem 1.5rem; border-top: none; }
-        .table td { padding: 1rem 1.5rem; vertical-align: middle; border-bottom: 1px solid #f1f5f9; }
+        .table th { background: #f8fafc; color: #64748b; font-size: 0.65rem; font-weight: 700; text-transform: uppercase; letter-spacing: 0.05em; padding: 0.75rem 1rem; border-top: none; }
+        .table td { padding: 0.75rem 1rem; vertical-align: middle; border-bottom: 1px solid #f1f5f9; }
         
-        code { background: #f1f5f9; color: #0369a1; padding: 4px 8px; border-radius: 6px; font-weight: 500; font-size: 0.85rem; }
-        .status-text { font-weight: 700; font-size: 0.75rem; text-transform: uppercase; }
+        code { background: #f1f5f9; color: #0369a1; padding: 3px 6px; border-radius: 5px; font-weight: 500; font-size: 0.8rem; }
+        .status-text { font-weight: 700; font-size: 0.7rem; text-transform: uppercase; }
         .status-online { color: #22c55e; }
         .status-offline { color: #ef4444; }
-        .status-dot { height: 10px; width: 10px; border-radius: 50%; display: inline-block; margin-right: 8px; }
-        .dot-online { background: #22c55e; box-shadow: 0 0 8px rgba(34, 197, 94, 0.4); }
-        .dot-offline { background: #ef4444; box-shadow: 0 0 8px rgba(239, 68, 68, 0.4); }
+        .status-dot { height: 8px; width: 8px; border-radius: 50%; display: inline-block; margin-right: 6px; }
+        .dot-online { background: #22c55e; box-shadow: 0 0 6px rgba(34, 197, 94, 0.4); }
+        .dot-offline { background: #ef4444; box-shadow: 0 0 6px rgba(239, 68, 68, 0.4); }
         
-        .chart-container { width: 140px; height: 30px; }
+        .chart-container { width: 100px; height: 25px; }
         
-        .btn-action { background: none; border: none; color: #0ea5e9; font-weight: 600; font-size: 0.85rem; padding: 4px 8px; display: inline-flex; align-items: center; }
+        .btn-action { background: none; border: none; color: #0ea5e9; font-weight: 600; font-size: 0.8rem; padding: 4px; display: inline-flex; align-items: center; }
         .btn-action:hover { color: #0284c7; }
         .btn-delete { color: #fca5a5; }
         .btn-delete:hover { color: #ef4444; }
         
         .add-section { padding: 1.5rem; border-top: 1px solid #f1f5f9; }
-        .add-title { color: #22c55e; font-weight: 600; font-size: 0.9rem; margin-bottom: 1rem; display: flex; align-items: center; }
+        .add-title { color: #22c55e; font-weight: 600; font-size: 0.85rem; margin-bottom: 1rem; display: flex; align-items: center; }
         .add-title i { margin-right: 8px; }
         
         .form-control { border-radius: 8px; border: 1px solid #e2e8f0; padding: 0.6rem 1rem; font-size: 0.9rem; }
@@ -152,24 +159,59 @@ HTML_TEMPLATE = '''
         .btn-include { background: #0ea5e9; color: white; border: none; border-radius: 8px; font-weight: 700; padding: 0.6rem 2rem; width: 100%; transition: all 0.2s; }
         .btn-include:hover { background: #0284c7; transform: translateY(-1px); }
         
-        .history-header { padding: 1.5rem; display: flex; align-items: center; font-weight: 700; font-size: 1.1rem; }
+        .history-header { padding: 1rem 1.5rem; display: flex; align-items: center; font-weight: 700; font-size: 1rem; border-bottom: 1px solid #f1f5f9; }
         .history-header i { color: #f97316; margin-right: 12px; }
-        .history-content { padding: 0 1.5rem 1.5rem; color: #94a3b8; font-size: 0.85rem; font-style: italic; }
+        .history-content { padding: 1rem 1.5rem; color: #94a3b8; font-size: 0.8rem; font-style: italic; }
         
-        .log-item { padding: 8px 0; border-bottom: 1px solid #f1f5f9; color: #475569; font-style: normal; display: flex; justify-content: space-between; }
-        .log-time { color: #94a3b8; font-weight: 500; margin-right: 12px; }
+        .log-item { padding: 8px 0; border-bottom: 1px solid #f1f5f9; color: #475569; font-style: normal; display: flex; flex-direction: column; }
+        .log-time { color: #94a3b8; font-weight: 600; font-size: 0.7rem; margin-bottom: 2px; }
+        .log-text { font-size: 0.8rem; }
+
+        /* Mobile Specific */
+        @media (max-width: 768px) {
+            .table-desktop { display: none; }
+            .mobile-cards { display: block; }
+            .branding { justify-content: center; text-align: center; flex-direction: column; }
+            .branding-logo { margin-right: 0; margin-bottom: 8px; }
+        }
+        @media (min-width: 769px) {
+            .table-desktop { display: table; }
+            .mobile-cards { display: none; }
+            .log-item { flex-direction: row; justify-content: space-between; }
+            .log-time { margin-bottom: 0; margin-right: 12px; }
+        }
+
+        .mobile-card { padding: 1rem 1.5rem; border-bottom: 1px solid #f1f5f9; }
+        .mobile-card:last-child { border-bottom: none; }
+        .mobile-card-header { display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 8px; }
+        .mobile-card-info h6 { margin: 0; font-size: 0.9rem; font-weight: 700; }
+        .mobile-card-info p { margin: 0; font-size: 0.75rem; color: #64748b; }
+        .mobile-card-status { display: flex; align-items: center; justify-content: space-between; }
     </style>
 </head>
 <body>
 
 <div class="container">
+    <!-- Branding Header -->
+    <div class="branding">
+        <div class="branding-logo">
+            <i class="bi bi-activity fs-4"></i>
+        </div>
+        <div class="branding-text">
+            <h1>MONITOR <span>PRODED</span></h1>
+            <p>Network Intelligence</p>
+        </div>
+    </div>
+
     <!-- Monitoramento de Hosts Card -->
     <div class="card">
         <div class="card-header">
             <h5><i class="bi bi-activity"></i> Monitoramento de Hosts</h5>
             <button class="btn btn-link p-0 text-muted" onclick="checkAll()"><i class="bi bi-arrow-clockwise fs-5"></i></button>
         </div>
-        <div class="table-responsive">
+        
+        <!-- Desktop Table -->
+        <div class="table-responsive table-desktop">
             <table class="table">
                 <thead>
                     <tr>
@@ -180,10 +222,15 @@ HTML_TEMPLATE = '''
                         <th>Ações</th>
                     </tr>
                 </thead>
-                <tbody id="host-list">
+                <tbody id="host-list-desktop">
                     <!-- JS -->
                 </tbody>
             </table>
+        </div>
+
+        <!-- Mobile Cards -->
+        <div id="host-list-mobile" class="mobile-cards">
+            <!-- JS -->
         </div>
         
         <!-- Adicionar Novo Host Section -->
@@ -243,11 +290,13 @@ HTML_TEMPLATE = '''
     }
 
     function render() {
-        const list = document.getElementById('host-list');
-        list.innerHTML = hosts.map(h => {
+        const desktopList = document.getElementById('host-list-desktop');
+        const mobileList = document.getElementById('host-list-mobile');
+        
+        // Render Desktop
+        desktopList.innerHTML = hosts.map(h => {
             const lastLatency = h.history && h.history.length > 0 ? h.history[h.history.length - 1] : null;
             const isOnline = h.status === 'online';
-            
             return `
                 <tr>
                     <td><code>${h.ip}</code></td>
@@ -262,7 +311,7 @@ HTML_TEMPLATE = '''
                     </td>
                     <td>
                         <div class="chart-container">
-                            <canvas id="chart-${h.id}"></canvas>
+                            <canvas id="chart-desktop-${h.id}"></canvas>
                         </div>
                     </td>
                     <td>
@@ -273,8 +322,42 @@ HTML_TEMPLATE = '''
             `;
         }).join('');
 
+        // Render Mobile
+        mobileList.innerHTML = hosts.map(h => {
+            const lastLatency = h.history && h.history.length > 0 ? h.history[h.history.length - 1] : null;
+            const isOnline = h.status === 'online';
+            return `
+                <div class="mobile-card">
+                    <div class="mobile-card-header">
+                        <div class="mobile-card-info">
+                            <h6><code>${h.ip}</code></h6>
+                            <p>${h.label}</p>
+                        </div>
+                        <div class="btn-group">
+                            <button class="btn-action" onclick="runTrace('${h.ip}')"><i class="bi bi-signpost-split"></i></button>
+                            <button class="btn-action btn-delete" onclick="removeHost('${h.id}')"><i class="bi bi-trash"></i></button>
+                        </div>
+                    </div>
+                    <div class="mobile-card-status">
+                        <div class="d-flex align-items-center">
+                            <span class="status-dot ${isOnline ? 'dot-online' : 'dot-offline'}"></span>
+                            <span class="status-text ${isOnline ? 'status-online' : 'status-offline'}">
+                                ${isOnline ? `ONLINE (${lastLatency}MS)` : 'OFFLINE'}
+                            </span>
+                        </div>
+                        <div class="chart-container">
+                            <canvas id="chart-mobile-${h.id}"></canvas>
+                        </div>
+                    </div>
+                </div>
+            `;
+        }).join('');
+
         renderLogs();
-        hosts.forEach(h => initChart(h));
+        hosts.forEach(h => {
+            initChart(h, 'desktop');
+            initChart(h, 'mobile');
+        });
     }
 
     function renderLogs() {
@@ -285,13 +368,14 @@ HTML_TEMPLATE = '''
         }
         container.innerHTML = logs.map(l => `
             <div class="log-item">
-                <span><span class="log-time">${l.time}</span> Host <strong>${l.label}</strong> (${l.ip}) ficou offline.</span>
+                <div class="log-time">${l.time}</div>
+                <div class="log-text">Host <strong>${l.label}</strong> (${l.ip}) ficou offline.</div>
             </div>
         `).join('');
     }
 
-    function initChart(host) {
-        const ctx = document.getElementById(`chart-${host.id}`);
+    function initChart(host, type) {
+        const ctx = document.getElementById(`chart-${type}-${host.id}`);
         if (!ctx) return;
         
         const data = (host.history || []).slice(-15);
@@ -311,6 +395,7 @@ HTML_TEMPLATE = '''
             options: {
                 responsive: true,
                 maintainAspectRatio: false,
+                animation: false,
                 plugins: { legend: { display: false }, tooltip: { enabled: false } },
                 scales: { x: { display: false }, y: { display: false, min: 0 } }
             }
