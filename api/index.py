@@ -154,8 +154,11 @@ HTML_TEMPLATE = '''
         .card-header h5 i { color: #0ea5e9; margin-right: 10px; }
         
         /* Header Branding */
-        .branding { display: flex; justify-content: center; align-items: center; margin-bottom: 2rem; padding: 1rem 0; }
-        .main-logo { height: 60px; width: auto; object-fit: contain; filter: drop-shadow(0 4px 6px rgba(0,0,0,0.05)); }
+        .branding { display: flex; flex-direction: column; align-items: center; justify-content: center; margin-bottom: 2rem; padding: 1rem 0; text-align: center; }
+        .branding-logo { background: #0ea5e9; color: white; padding: 12px; border-radius: 14px; margin-bottom: 12px; display: flex; align-items: center; justify-content: center; box-shadow: 0 4px 12px rgba(14, 165, 233, 0.2); }
+        .branding-text h1 { font-size: 1.5rem; font-weight: 800; margin: 0; line-height: 1.2; letter-spacing: -0.02em; color: #1e293b; }
+        .branding-text h1 span { color: #0ea5e9; }
+        .branding-text p { font-size: 0.75rem; font-weight: 700; color: #94a3b8; text-transform: uppercase; letter-spacing: 0.15em; margin-top: 4px; }
 
         .table { margin-bottom: 0; }
         .table th { background: #f8fafc; color: #64748b; font-size: 0.65rem; font-weight: 700; text-transform: uppercase; letter-spacing: 0.05em; padding: 0.75rem 1rem; border-top: none; }
@@ -231,7 +234,13 @@ HTML_TEMPLATE = '''
 <div class="container">
     <!-- Branding Header -->
     <div class="branding">
-        <img src="https://ais-dev-js32nd5ruwobqh254yjbl4-334868998364.us-west2.run.app/static/logo.png" alt="PRODED Logo" class="main-logo" referrerPolicy="no-referrer">
+        <div class="branding-logo">
+            <i class="bi bi-activity fs-2"></i>
+        </div>
+        <div class="branding-text">
+            <h1>MONITOR <span>PRODED</span></h1>
+            <p>Network Intelligence</p>
+        </div>
     </div>
 
     <!-- Monitoramento de Hosts Card -->
