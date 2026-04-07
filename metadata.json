@@ -1,0 +1,5 @@
+{
+  "name": "Monitor PRODED",
+  "description": "Monitor PRODED - Monitoramento de rede inteligente com status check ICMP, gráficos de latência e histórico de perdas.",
+  "requestFramePermissions": []
+}
