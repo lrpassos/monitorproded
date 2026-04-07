@@ -48,27 +48,33 @@ def check_status():
             target_ip = socket.gethostbyname(ip)
             socket.setdefaulttimeout(TIMEOUT)
             
-            # 5 tentativas
-            for _ in range(5):
+            # Portas para tentar (Comuns em provedores e servidores)
+            # 80/443 (Web), 22 (SSH), 8291 (Winbox/Mikrotik), 23 (Telnet)
+            ports_to_try = [80, 443, 22, 8291, 23]
+            
+            for port in ports_to_try:
                 try:
                     start = time.time()
-                    # Tenta porta 80
                     with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
-                        s.connect((target_ip, 80))
+                        s.connect((target_ip, port))
                         latency = round((time.time() - start) * 1000, 1)
                         is_online = True
-                        break
+                        break # Se conectou em qualquer porta, está online
                 except:
+                    continue
+            
+            # Se ainda não estiver online, faz mais 2 tentativas na porta 80 por garantia
+            if not is_online:
+                for _ in range(2):
                     try:
                         start = time.time()
-                        # Tenta porta 443
                         with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
-                            s.connect((target_ip, 443))
+                            s.connect((target_ip, 80))
                             latency = round((time.time() - start) * 1000, 1)
                             is_online = True
                             break
                     except:
-                        continue
+                        time.sleep(0.1)
         except:
             pass
         
