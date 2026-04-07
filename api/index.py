@@ -155,7 +155,7 @@ HTML_TEMPLATE = '''
         
         /* Header Branding */
         .branding { display: flex; justify-content: center; align-items: center; margin-bottom: 2rem; padding: 1rem 0; }
-        .main-logo { height: 80px; width: auto; object-fit: contain; filter: drop-shadow(0 4px 6px rgba(0,0,0,0.05)); }
+        .main-logo { height: 60px; width: auto; object-fit: contain; filter: drop-shadow(0 4px 6px rgba(0,0,0,0.05)); }
 
         .table { margin-bottom: 0; }
         .table th { background: #f8fafc; color: #64748b; font-size: 0.65rem; font-weight: 700; text-transform: uppercase; letter-spacing: 0.05em; padding: 0.75rem 1rem; border-top: none; }
