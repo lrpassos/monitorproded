@@ -154,11 +154,8 @@ HTML_TEMPLATE = '''
         .card-header h5 i { color: #0ea5e9; margin-right: 10px; }
         
         /* Header Branding */
-        .branding { display: flex; align-items: center; margin-bottom: 1.5rem; padding: 0 0.5rem; }
-        .branding-logo { background: #0ea5e9; color: white; padding: 8px; border-radius: 10px; margin-right: 12px; display: flex; align-items: center; justify-content: center; }
-        .branding-text h1 { font-size: 1.25rem; font-weight: 800; margin: 0; line-height: 1; letter-spacing: -0.02em; }
-        .branding-text h1 span { color: #0ea5e9; }
-        .branding-text p { font-size: 0.65rem; font-weight: 700; color: #94a3b8; text-transform: uppercase; letter-spacing: 0.1em; margin: 0; }
+        .branding { display: flex; justify-content: center; align-items: center; margin-bottom: 2rem; padding: 1rem 0; }
+        .main-logo { height: 80px; width: auto; object-fit: contain; filter: drop-shadow(0 4px 6px rgba(0,0,0,0.05)); }
 
         .table { margin-bottom: 0; }
         .table th { background: #f8fafc; color: #64748b; font-size: 0.65rem; font-weight: 700; text-transform: uppercase; letter-spacing: 0.05em; padding: 0.75rem 1rem; border-top: none; }
@@ -200,8 +197,6 @@ HTML_TEMPLATE = '''
         @media (max-width: 768px) {
             .table-desktop { display: none; }
             .mobile-cards { display: block; }
-            .branding { justify-content: center; text-align: center; flex-direction: column; }
-            .branding-logo { margin-right: 0; margin-bottom: 8px; }
         }
         @media (min-width: 769px) {
             .table-desktop { display: table; }
@@ -236,13 +231,7 @@ HTML_TEMPLATE = '''
 <div class="container">
     <!-- Branding Header -->
     <div class="branding">
-        <div class="branding-logo">
-            <i class="bi bi-activity fs-4"></i>
-        </div>
-        <div class="branding-text">
-            <h1>MONITOR <span>PRODED</span></h1>
-            <p>Network Intelligence</p>
-        </div>
+        <img src="https://ais-dev-js32nd5ruwobqh254yjbl4-334868998364.us-west2.run.app/static/logo.png" alt="PRODED Logo" class="main-logo" referrerPolicy="no-referrer">
     </div>
 
     <!-- Monitoramento de Hosts Card -->
