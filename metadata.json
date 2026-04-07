@@ -1,5 +1,5 @@
 {
-  "name": "Monitor PRODED",
-  "description": "Monitor PRODED - Monitoramento de rede inteligente com status check ICMP, gráficos de latência e histórico de perdas.",
+  "name": "IP Monitor PRO",
+  "description": "Monitor de disponibilidade de IPs em tempo real para Vercel, com persistência local e verificação automática a cada 5 minutos.",
   "requestFramePermissions": []
 }
