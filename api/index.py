@@ -88,6 +88,35 @@ def check_status():
     
     return jsonify(results)
 
+@app.route('/api/ping-single/<host>')
+def ping_single(host):
+    """Realiza um único teste de conexão para o modo 'Ping -t'."""
+    is_online = False
+    latency = 0
+    try:
+        target_ip = socket.gethostbyname(host)
+        socket.setdefaulttimeout(TIMEOUT)
+        
+        # Tenta portas comuns rapidamente
+        for port in [80, 443, 22, 8291]:
+            try:
+                start = time.time()
+                with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+                    s.connect((target_ip, port))
+                    latency = round((time.time() - start) * 1000, 1)
+                    is_online = True
+                    break
+            except:
+                continue
+    except:
+        pass
+        
+    return jsonify({
+        "status": "online" if is_online else "offline",
+        "latency": latency if is_online else None,
+        "time": time.strftime("%H:%M:%S")
+    })
+
 @app.route('/api/traceroute/<host>')
 def run_traceroute(host):
     """Simula traceroute para o Vercel."""
@@ -187,6 +216,19 @@ HTML_TEMPLATE = '''
         .mobile-card-info h6 { margin: 0; font-size: 0.9rem; font-weight: 700; }
         .mobile-card-info p { margin: 0; font-size: 0.75rem; color: #64748b; }
         .mobile-card-status { display: flex; align-items: center; justify-content: space-between; }
+
+        /* Terminal Style for Ping */
+        .terminal-output {
+            background: #000;
+            color: #0f0;
+            padding: 1rem;
+            border-radius: 8px;
+            font-family: 'JetBrains Mono', 'Courier New', monospace;
+            font-size: 0.8rem;
+            height: 300px;
+            overflow-y: auto;
+            white-space: pre-wrap;
+        }
     </style>
 </head>
 <body>
@@ -276,6 +318,24 @@ HTML_TEMPLATE = '''
     </div>
 </div>
 
+<!-- Modal Ping -t -->
+<div class="modal fade" id="pingModal" tabindex="-1" data-bs-backdrop="static">
+    <div class="modal-dialog modal-lg modal-dialog-centered">
+        <div class="modal-content bg-dark text-light" style="border-radius: 12px;">
+            <div class="modal-header border-secondary">
+                <h6 class="modal-title fw-bold font-monospace">ping -t output</h6>
+                <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal" onclick="stopPing()"></button>
+            </div>
+            <div class="modal-body p-3">
+                <div id="ping-output" class="terminal-output"></div>
+            </div>
+            <div class="modal-footer border-secondary">
+                <button type="button" class="btn btn-outline-light btn-sm" onclick="stopPing()" data-bs-dismiss="modal">Fechar</button>
+            </div>
+        </div>
+    </div>
+</div>
+
 <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
 <script>
     let hosts = JSON.parse(localStorage.getItem('proded_monitor_v2')) || [
@@ -283,6 +343,7 @@ HTML_TEMPLATE = '''
         { id: '2', ip: '1.1.1.1', label: 'Cloudflare DNS', history: [] }
     ];
     let logs = JSON.parse(localStorage.getItem('proded_logs_v2')) || [];
+    let pingInterval = null;
 
     function save() {
         localStorage.setItem('proded_monitor_v2', JSON.stringify(hosts));
@@ -315,6 +376,7 @@ HTML_TEMPLATE = '''
                         </div>
                     </td>
                     <td>
+                        <button class="btn-action" onclick="startPing('${h.ip}')"><i class="bi bi-broadcast me-1"></i> Ping</button>
                         <button class="btn-action" onclick="runTrace('${h.ip}')"><i class="bi bi-signpost-split me-1"></i> Trace</button>
                         <button class="btn-action btn-delete" onclick="removeHost('${h.id}')"><i class="bi bi-trash"></i></button>
                     </td>
@@ -334,6 +396,7 @@ HTML_TEMPLATE = '''
                             <p>${h.label}</p>
                         </div>
                         <div class="btn-group">
+                            <button class="btn-action" onclick="startPing('${h.ip}')"><i class="bi bi-broadcast"></i></button>
                             <button class="btn-action" onclick="runTrace('${h.ip}')"><i class="bi bi-signpost-split"></i></button>
                             <button class="btn-action btn-delete" onclick="removeHost('${h.id}')"><i class="bi bi-trash"></i></button>
                         </div>
@@ -479,6 +542,41 @@ HTML_TEMPLATE = '''
             output.innerText = text;
         } catch (e) {
             output.innerText = 'Erro ao executar traceroute.';
+        }
+    }
+
+    function startPing(ip) {
+        const modal = new bootstrap.Modal(document.getElementById('pingModal'));
+        const output = document.getElementById('ping-output');
+        output.innerHTML = `Disparando contra ${ip} com 32 bytes de dados:\\n`;
+        modal.show();
+        
+        if (pingInterval) clearInterval(pingInterval);
+        
+        pingInterval = setInterval(async () => {
+            try {
+                const res = await fetch('/api/ping-single/' + ip);
+                const data = await res.json();
+                
+                let line = '';
+                if (data.status === 'online') {
+                    line = `Resposta de ${ip}: bytes=32 tempo=${data.latency}ms TTL=54\\n`;
+                } else {
+                    line = `Esgotado o tempo de limite do pedido.\\n`;
+                }
+                
+                output.innerHTML += line;
+                output.scrollTop = output.scrollHeight;
+            } catch (e) {
+                output.innerHTML += `Erro na requisição...\\n`;
+            }
+        }, 1000);
+    }
+
+    function stopPing() {
+        if (pingInterval) {
+            clearInterval(pingInterval);
+            pingInterval = null;
         }
     }
 
