@@ -11,7 +11,10 @@ app = Flask(__name__)
 CORS(app)
 
 TIMEOUT = 1
-STATE_FILE = '/tmp/proded_state.json'
+PERSISTENT_STATE_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'proded_state.json')
+TMP_STATE_FILE = '/tmp/proded_state.json'
+
+STATE_FILE = PERSISTENT_STATE_FILE
 STATE_LOCK = threading.RLock()
 
 DEFAULT_HOSTS = [
@@ -27,15 +30,36 @@ GLOBAL_STATE = {
 def load_state():
     global GLOBAL_STATE
     with STATE_LOCK:
-        if os.path.exists(STATE_FILE):
+        # 1. Tenta carregar do arquivo de dados persistente (Base de dados em arquivo JSON no projeto)
+        if os.path.exists(PERSISTENT_STATE_FILE):
             try:
-                with open(STATE_FILE, 'r') as f:
+                with open(PERSISTENT_STATE_FILE, 'r') as f:
                     data = json.load(f)
                     if isinstance(data, dict) and 'hosts' in data and 'logs' in data:
                         GLOBAL_STATE = data
                         return
             except Exception as e:
-                print("Erro ao carregar estado do arquivo:", e)
+                print("Erro ao carregar estado persistente:", e)
+        
+        # 2. Se não existir, tenta migrar do temporário para manter o histórico e IPs sem limpar os registros do usuario!
+        if os.path.exists(TMP_STATE_FILE):
+            try:
+                with open(TMP_STATE_FILE, 'r') as f:
+                    data = json.load(f)
+                    if isinstance(data, dict) and 'hosts' in data and 'logs' in data:
+                        GLOBAL_STATE = data
+                        # Salva imediatamente no persistente
+                        try:
+                            with open(PERSISTENT_STATE_FILE, 'w') as out_f:
+                                json.dump(GLOBAL_STATE, out_f)
+                            print("Estado migrado de temporário para persistente com sucesso!")
+                        except Exception as save_err:
+                            print("Erro ao gravar estado migrado:", save_err)
+                        return
+            except Exception as e:
+                print("Erro ao tentar ler estado temporário para migração:", e)
+
+        # 3. Se nenhum existir, inicializa com o estado padrão
         GLOBAL_STATE = {
             "hosts": DEFAULT_HOSTS,
             "logs": []
