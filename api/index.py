@@ -160,7 +160,19 @@ def check_status_internal():
                     "timestamp": now_ms,
                     "time": dt_now.strftime("%d/%m/%Y %H:%M:%S"),
                     "ip": ip,
-                    "label": host.get('label', ip)
+                    "label": host.get('label', ip),
+                    "type": "offline"
+                }
+                logs.insert(0, new_log)
+            # Lógica de latência alta (Online com ping acima de 300ms)
+            elif is_online and latency > 300:
+                new_log = {
+                    "timestamp": now_ms,
+                    "time": dt_now.strftime("%d/%m/%Y %H:%M:%S"),
+                    "ip": ip,
+                    "label": host.get('label', ip),
+                    "type": "high_latency",
+                    "latency": latency
                 }
                 logs.insert(0, new_log)
                 
@@ -507,15 +519,22 @@ HTML_TEMPLATE = '''
         desktopList.innerHTML = hosts.map(h => {
             const lastLatency = h.history && h.history.length > 0 ? h.history[h.history.length - 1] : null;
             const isOnline = h.status === 'online';
+            const isHigh = isOnline && lastLatency && lastLatency > 300;
+            
+            const dotClass = isOnline ? (isHigh ? 'bg-warning' : 'dot-online') : 'dot-offline';
+            const dotStyle = isHigh ? 'box-shadow: 0 0 6px rgba(245, 158, 11, 0.4);' : '';
+            const statusClass = isOnline ? (isHigh ? 'text-warning' : 'status-online') : 'status-offline';
+            const statusStyle = isHigh ? 'color: #d97706 !important;' : '';
+            const statusText = isOnline ? `ONLINE (${lastLatency}MS)${isHigh ? ' - ALTA LATÊNCIA' : ''}` : 'OFFLINE';
             return `
                 <tr>
                     <td><code>${maskIp(h.ip)}</code></td>
                     <td class="text-muted small">${maskIp(h.label)}</td>
                     <td>
                         <div class="d-flex align-items-center">
-                            <span class="status-dot ${isOnline ? 'dot-online' : 'dot-offline'}"></span>
-                            <span class="status-text ${isOnline ? 'status-online' : 'status-offline'}">
-                                ${isOnline ? `ONLINE (${lastLatency}MS)` : 'OFFLINE'}
+                            <span class="status-dot ${dotClass}" style="${dotStyle}"></span>
+                            <span class="status-text ${statusClass}" style="${statusStyle}">
+                                ${statusText}
                             </span>
                         </div>
                     </td>
@@ -537,6 +556,13 @@ HTML_TEMPLATE = '''
         mobileList.innerHTML = hosts.map(h => {
             const lastLatency = h.history && h.history.length > 0 ? h.history[h.history.length - 1] : null;
             const isOnline = h.status === 'online';
+            const isHigh = isOnline && lastLatency && lastLatency > 300;
+            
+            const dotClass = isOnline ? (isHigh ? 'bg-warning' : 'dot-online') : 'dot-offline';
+            const dotStyle = isHigh ? 'box-shadow: 0 0 6px rgba(245, 158, 11, 0.4);' : '';
+            const statusClass = isOnline ? (isHigh ? 'text-warning' : 'status-online') : 'status-offline';
+            const statusStyle = isHigh ? 'color: #d97706 !important;' : '';
+            const statusText = isOnline ? `ONLINE (${lastLatency}MS)${isHigh ? ' - ALTA LATÊNCIA' : ''}` : 'OFFLINE';
             return `
                 <div class="mobile-card">
                     <div class="mobile-card-header">
@@ -552,9 +578,9 @@ HTML_TEMPLATE = '''
                     </div>
                     <div class="mobile-card-status">
                         <div class="d-flex align-items-center">
-                            <span class="status-dot ${isOnline ? 'dot-online' : 'dot-offline'}"></span>
-                            <span class="status-text ${isOnline ? 'status-online' : 'status-offline'}">
-                                ${isOnline ? `ONLINE (${lastLatency}MS)` : 'OFFLINE'}
+                            <span class="status-dot ${dotClass}" style="${dotStyle}"></span>
+                            <span class="status-text ${statusClass}" style="${statusStyle}">
+                                ${statusText}
                             </span>
                         </div>
                         <div class="chart-container">
@@ -585,12 +611,18 @@ HTML_TEMPLATE = '''
             container.innerHTML = 'Nenhuma perda de ping registrada nos últimos 7 dias.';
             return;
         }
-        container.innerHTML = filteredLogs.map(l => `
-            <div class="log-item">
-                <div class="log-time">${l.time}</div>
-                <div class="log-text">Host <strong>${maskIp(l.label)}</strong> (${maskIp(l.ip)}) ficou offline.</div>
-            </div>
-        `).join('');
+        container.innerHTML = filteredLogs.map(l => {
+            let msg = `Host <strong>${maskIp(l.label)}</strong> (${maskIp(l.ip)}) ficou offline.`;
+            if (l.type === 'high_latency') {
+                msg = `Host <strong>${maskIp(l.label)}</strong> (${maskIp(l.ip)}) registrou latência alta (${l.latency}ms).`;
+            }
+            return `
+                <div class="log-item">
+                    <div class="log-time">${l.time}</div>
+                    <div class="log-text">${msg}</div>
+                </div>
+            `;
+        }).join('');
     }
 
     function openHistoryModal() {
@@ -617,13 +649,19 @@ HTML_TEMPLATE = '''
                             </tr>
                         </thead>
                         <tbody>
-                            ${filteredLogs.map(l => `
-                                <tr>
-                                    <td class="font-monospace small text-muted">${l.time}</td>
-                                    <td><strong>${maskIp(l.label)}</strong> <code class="small text-secondary">(${maskIp(l.ip)})</code></td>
-                                    <td><span class="badge bg-danger-subtle text-danger" style="font-size: 0.7rem;">OFFLINE</span></td>
-                                </tr>
-                            `).join('')}
+                            ${filteredLogs.map(l => {
+                                const isHighLatency = l.type === 'high_latency';
+                                const badgeClass = isHighLatency ? 'bg-warning-subtle text-warning' : 'bg-danger-subtle text-danger';
+                                const badgeStyle = isHighLatency ? 'font-size: 0.7rem; color: #b45309 !important;' : 'font-size: 0.7rem;';
+                                const badgeText = isHighLatency ? `LATÊNCIA ALTA (${l.latency}ms)` : 'OFFLINE';
+                                return `
+                                    <tr>
+                                        <td class="font-monospace small text-muted">${l.time}</td>
+                                        <td><strong>${maskIp(l.label)}</strong> <code class="small text-secondary">(${maskIp(l.ip)})</code></td>
+                                        <td><span class="badge ${badgeClass}" style="${badgeStyle}">${badgeText}</span></td>
+                                    </tr>
+                                `;
+                            }).join('')}
                         </tbody>
                     </table>
                 </div>
