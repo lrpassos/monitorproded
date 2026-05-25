@@ -1,6 +1,8 @@
 import os
 import socket
 import time
+import json
+import threading
 from flask import Flask, jsonify, render_template_string, request
 from flask_cors import CORS
 
@@ -8,85 +10,186 @@ app = Flask(__name__)
 CORS(app)
 
 TIMEOUT = 1
+STATE_FILE = '/tmp/proded_state.json'
+STATE_LOCK = threading.RLock()
 
-def check_tcp_status(ip):
-    """Tenta conexão TCP nas portas 80 e 443."""
-    try:
-        target_ip = socket.gethostbyname(ip)
-        socket.setdefaulttimeout(TIMEOUT)
-        # Tenta porta 80
-        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
-            s.connect((target_ip, 80))
-            return True
-    except:
+DEFAULT_HOSTS = [
+    { 'id': '1', 'ip': '8.8.8.8', 'label': 'Google DNS', 'history': [], 'status': 'unknown' },
+    { 'id': '2', 'ip': '1.1.1.1', 'label': 'Cloudflare DNS', 'history': [], 'status': 'unknown' }
+]
+
+GLOBAL_STATE = {
+    "hosts": DEFAULT_HOSTS,
+    "logs": []
+}
+
+def load_state():
+    global GLOBAL_STATE
+    with STATE_LOCK:
+        if os.path.exists(STATE_FILE):
+            try:
+                with open(STATE_FILE, 'r') as f:
+                    data = json.load(f)
+                    if isinstance(data, dict) and 'hosts' in data and 'logs' in data:
+                        GLOBAL_STATE = data
+                        return
+            except Exception as e:
+                print("Erro ao carregar estado do arquivo:", e)
+        GLOBAL_STATE = {
+            "hosts": DEFAULT_HOSTS,
+            "logs": []
+        }
+
+def save_state():
+    with STATE_LOCK:
         try:
-            # Tenta porta 443
-            with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
-                s.connect((target_ip, 443))
-                return True
-        except:
-            return False
+            with open(STATE_FILE, 'w') as f:
+                json.dump(GLOBAL_STATE, f)
+        except Exception as e:
+            print("Erro ao salvar estado no arquivo:", e)
+
+# Inicializa o estado
+load_state()
 
 @app.route('/')
 def index():
     return render_template_string(HTML_TEMPLATE)
 
-@app.route('/api/check', methods=['POST'])
-def check_status():
-    """Realiza 5 tentativas para cada IP e retorna latência."""
-    data = request.json
-    hosts = data.get('hosts', [])
-    results = []
+@app.route('/api/state', methods=['GET'])
+def get_state():
+    load_state()
+    return jsonify(GLOBAL_STATE)
+
+@app.route('/api/hosts/add', methods=['POST'])
+def add_host():
+    load_state()
+    data = request.json or {}
+    ip = data.get('ip', '').strip()
+    label = data.get('label', '').strip()
+    if not ip:
+        return jsonify({"error": "IP ou Domínio inválido."}), 400
     
-    for host in hosts:
-        ip = host.get('ip')
-        is_online = False
-        latency = 0
+    new_host = {
+        "id": str(int(time.time() * 1000)),
+        "ip": ip,
+        "label": label or ip,
+        "status": "unknown",
+        "history": []
+    }
+    GLOBAL_STATE["hosts"].append(new_host)
+    save_state()
+    return jsonify(GLOBAL_STATE)
+
+@app.route('/api/hosts/delete/<host_id>', methods=['POST', 'DELETE'])
+def delete_host(host_id):
+    load_state()
+    GLOBAL_STATE["hosts"] = [h for h in GLOBAL_STATE["hosts"] if str(h.get('id')) != str(host_id)]
+    save_state()
+    return jsonify(GLOBAL_STATE)
+
+def check_status_internal():
+    """Realiza verificação de latência de todos os hosts e registra logs de queda no backend com thread safety."""
+    with STATE_LOCK:
+        load_state()
+        hosts = GLOBAL_STATE.get('hosts', [])
+        logs = GLOBAL_STATE.get('logs', [])
+        now_ms = int(time.time() * 1000)
         
-        # Resolve o host uma vez
-        try:
-            target_ip = socket.gethostbyname(ip)
-            socket.setdefaulttimeout(TIMEOUT)
+        # Limites para logs
+        thirty_days_ms = 30 * 24 * 60 * 60 * 1000
+        
+        for host in hosts:
+            ip = host.get('ip')
+            was_online = host.get('status') == 'online'
+            is_online = False
+            latency = 0
             
-            # Portas para tentar (Comuns em provedores e servidores)
-            # 80/443 (Web), 22 (SSH), 8291 (Winbox/Mikrotik), 23 (Telnet)
-            ports_to_try = [80, 443, 22, 8291, 23]
-            
-            for port in ports_to_try:
-                try:
-                    start = time.time()
-                    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
-                        s.connect((target_ip, port))
-                        latency = round((time.time() - start) * 1000, 1)
-                        is_online = True
-                        break # Se conectou em qualquer porta, está online
-                except:
-                    continue
-            
-            # Se ainda não estiver online, faz mais 2 tentativas na porta 80 por garantia
-            if not is_online:
-                for _ in range(2):
+            try:
+                target_ip = socket.gethostbyname(ip)
+                socket.setdefaulttimeout(TIMEOUT)
+                
+                # Portas para tentar conexão TCP
+                ports_to_try = [80, 443, 22, 8291, 23]
+                for port in ports_to_try:
                     try:
-                        start = time.time()
+                        start_time = time.time()
                         with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
-                            s.connect((target_ip, 80))
-                            latency = round((time.time() - start) * 1000, 1)
+                            s.connect((target_ip, port))
+                            latency = round((time.time() - start_time) * 1000, 1)
                             is_online = True
                             break
                     except:
-                        time.sleep(0.1)
-        except:
-            pass
+                        continue
+                
+                # Segunda tentativa de contingência na porta 80 por garantia
+                if not is_online:
+                    for _ in range(2):
+                        try:
+                            start_time = time.time()
+                            with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+                                s.connect((target_ip, 80))
+                                latency = round((time.time() - start_time) * 1000, 1)
+                                is_online = True
+                                break
+                        except:
+                            time.sleep(0.1)
+            except:
+                pass
+            
+            status = "online" if is_online else "offline"
+            host["status"] = status
+            
+            if "history" not in host or not isinstance(host["history"], list):
+                host["history"] = []
+                
+            if is_online:
+                host["history"].append(latency if latency > 0 else 10)
+            else:
+                host["history"].append(0)
+                
+            host["history"] = host["history"][-30:] # Guarda últimos 30 pings no gráfico
+            
+            # Lógica de queda de ping (Muda de online para offline)
+            if was_online and not is_online:
+                new_log = {
+                    "timestamp": now_ms,
+                    "time": time.strftime("%d/%m/%Y %H:%M:%S"),
+                    "ip": ip,
+                    "label": host.get('label', ip)
+                }
+                logs.insert(0, new_log)
+                
+        # Remove logs com mais de 30 dias de registro
+        logs = [l for l in logs if (now_ms - l.get('timestamp', 0)) <= thirty_days_ms]
         
-        results.append({
-            "id": host.get('id'),
-            "ip": ip,
-            "status": "online" if is_online else "offline",
-            "latency": latency if is_online else None,
-            "last_check": time.strftime("%H:%M:%S")
-        })
-    
-    return jsonify(results)
+        GLOBAL_STATE['hosts'] = hosts
+        GLOBAL_STATE['logs'] = logs
+        save_state()
+
+def background_monitor():
+    """Loop continuo que executa o monitoramento a cada 5 minutos em segundo plano."""
+    time.sleep(10) # Aguarda inicialização inicial do servidor
+    while True:
+        try:
+            check_status_internal()
+        except Exception as e:
+            print("Erro no monitoramento automático:", e)
+        time.sleep(300) # 5 minutos (300 segundos)
+
+def start_background_thread():
+    if os.environ.get("WERKZEUG_RUN_MAIN") == "true" or os.environ.get("WERKZEUG_RUN_MAIN") is None:
+        monitor_thread = threading.Thread(target=background_monitor, daemon=True)
+        monitor_thread.start()
+        print("Monitoramento em segundo plano ativado com sucesso!")
+
+# Inicializa o monitor automático em segundo plano
+start_background_thread()
+
+@app.route('/api/check', methods=['POST', 'GET'])
+def check_status():
+    """Realiza verificação de latência de todos os hosts e registra logs de queda no backend."""
+    check_status_internal()
+    return jsonify(GLOBAL_STATE)
 
 @app.route('/api/ping-single/<host>')
 def ping_single(host):
@@ -97,7 +200,6 @@ def ping_single(host):
         target_ip = socket.gethostbyname(host)
         socket.setdefaulttimeout(TIMEOUT)
         
-        # Tenta portas comuns rapidamente
         for port in [80, 443, 22, 8291]:
             try:
                 start = time.time()
@@ -119,7 +221,7 @@ def ping_single(host):
 
 @app.route('/api/traceroute/<host>')
 def run_traceroute(host):
-    """Simula traceroute para o Vercel."""
+    """Simula traceroute para o host."""
     try:
         target_ip = socket.gethostbyname(host)
     except:
@@ -295,10 +397,10 @@ HTML_TEMPLATE = '''
         </div>
     </div>
 
-    <!-- Histórico de Perda de Ping Card -->
+    <!-- Histórico de Perda de Ping Card (Até 7 Dias) -->
     <div class="card">
         <div class="history-header">
-            <i class="bi bi-clock"></i> Histórico de Perda de Ping
+            <i class="bi bi-clock"></i> Histórico de Perda de Ping (Últimos 7 dias)
         </div>
         <div class="history-content" id="loss-history">
             Nenhuma perda de ping registrada recentemente.
@@ -363,49 +465,19 @@ HTML_TEMPLATE = '''
 
 <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
 <script>
-    let hosts = JSON.parse(localStorage.getItem('proded_monitor_v2')) || [
-        { id: '1', ip: '8.8.8.8', label: 'Google DNS', history: [] },
-        { id: '2', ip: '1.1.1.1', label: 'Cloudflare DNS', history: [] }
-    ];
-    let logs = JSON.parse(localStorage.getItem('proded_logs_v2')) || [];
+    let hosts = [];
+    let logs = [];
     let pingInterval = null;
 
-    function migrateLogs() {
-        let changed = false;
-        logs = logs.map(l => {
-            if (!l.timestamp) {
-                l.timestamp = Date.now();
-                changed = true;
-            }
-            if (!l.time || l.time.indexOf('/') === -1) {
-                l.time = new Date(l.timestamp).toLocaleString('pt-BR');
-                changed = true;
-            }
-            return l;
-        });
-        if (changed) {
-            save();
+    async function loadStateFromServer() {
+        try {
+            const res = await fetch('/api/state');
+            const data = await res.json();
+            hosts = data.hosts || [];
+            logs = data.logs || [];
+        } catch (e) {
+            console.error("Erro ao carregar estado do servidor:", e);
         }
-    }
-
-    function cleanupLogs() {
-        const now = Date.now();
-        const thirtyDaysMs = 30 * 24 * 60 * 60 * 1000;
-        const initialCount = logs.length;
-        logs = logs.filter(l => {
-            return (now - l.timestamp) <= thirtyDaysMs;
-        });
-        if (logs.length !== initialCount) {
-            save();
-        }
-    }
-
-    migrateLogs();
-    cleanupLogs();
-
-    function save() {
-        localStorage.setItem('proded_monitor_v2', JSON.stringify(hosts));
-        localStorage.setItem('proded_logs_v2', JSON.stringify(logs));
     }
 
     function render() {
@@ -486,10 +558,8 @@ HTML_TEMPLATE = '''
         const now = Date.now();
         const sevenDaysMs = 7 * 24 * 60 * 60 * 1000;
         
-        cleanupLogs();
-        
         const filteredLogs = logs.filter(l => {
-            return (now - l.timestamp) <= sevenDaysMs;
+            return (now - (l.timestamp || now)) <= sevenDaysMs;
         });
         
         if (filteredLogs.length === 0) {
@@ -505,14 +575,13 @@ HTML_TEMPLATE = '''
     }
 
     function openHistoryModal() {
-        cleanupLogs();
         const modal = new bootstrap.Modal(document.getElementById('historyModal'));
         const container = document.getElementById('full-history-content');
         const now = Date.now();
         const thirtyDaysMs = 30 * 24 * 60 * 60 * 1000;
         
         const filteredLogs = logs.filter(l => {
-            return (now - l.timestamp) <= thirtyDaysMs;
+            return (now - (l.timestamp || now)) <= thirtyDaysMs;
         });
         
         if (filteredLogs.length === 0) {
@@ -573,70 +642,56 @@ HTML_TEMPLATE = '''
     }
 
     async function checkAll() {
-        if (hosts.length === 0) return;
-        
         try {
             const res = await fetch('/api/check', {
-                method: 'POST',
-                headers: {'Content-Type': 'application/json'},
-                body: JSON.stringify({ hosts })
+                method: 'POST'
             });
-            const results = await res.json();
-            
-            results.forEach(r => {
-                const h = hosts.find(item => item.id === r.id);
-                if (h) {
-                    const wasOnline = h.status === 'online';
-                    const isOnline = r.status === 'online';
-                    
-                    if (wasOnline && !isOnline) {
-                        const now = Date.now();
-                        logs.unshift({
-                            timestamp: now,
-                            time: new Date(now).toLocaleString('pt-BR'),
-                            ip: h.ip,
-                            label: h.label
-                        });
-                        cleanupLogs();
-                    }
-                    
-                    h.status = r.status;
-                    if (!h.history) h.history = [];
-                    if (isOnline) h.history.push(r.latency || 10);
-                    else h.history.push(0);
-                    h.history = h.history.slice(-30);
-                }
-            });
-            
-            save();
+            const data = await res.json();
+            hosts = data.hosts || [];
+            logs = data.logs || [];
             render();
-        } catch (e) { console.error(e); }
+        } catch (e) {
+            console.error("Erro ao executar checkAll:", e);
+        }
     }
 
-    function addHost() {
+    async function addHost() {
         const ip = document.getElementById('new-ip').value.trim();
         const label = document.getElementById('new-label').value.trim();
         if (!ip) return;
         
-        hosts.push({
-            id: Date.now().toString(),
-            ip: ip,
-            label: label || ip,
-            status: null,
-            history: []
-        });
-        
-        document.getElementById('new-ip').value = '';
-        document.getElementById('new-label').value = '';
-        save();
-        render();
-        checkAll();
+        try {
+            const res = await fetch('/api/hosts/add', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({ ip, label })
+            });
+            const data = await res.json();
+            hosts = data.hosts || [];
+            logs = data.logs || [];
+            render();
+            
+            document.getElementById('new-ip').value = '';
+            document.getElementById('new-label').value = '';
+            checkAll();
+        } catch (e) {
+            console.error("Erro ao adicionar host:", e);
+        }
     }
 
-    function removeHost(id) {
-        hosts = hosts.filter(h => h.id !== id);
-        save();
-        render();
+    async function removeHost(id) {
+        if (!confirm('Deseja realmente remover este host?')) return;
+        try {
+            const res = await fetch('/api/hosts/delete/' + id, {
+                method: 'POST'
+            });
+            const data = await res.json();
+            hosts = data.hosts || [];
+            logs = data.logs || [];
+            render();
+        } catch (e) {
+            console.error("Erro ao remover host:", e);
+        }
     }
 
     async function runTrace(ip) {
@@ -693,9 +748,16 @@ HTML_TEMPLATE = '''
         }
     }
 
-    render();
-    checkAll();
-    setInterval(checkAll, 300000); // 5 min
+    async function bootstrapApp() {
+        await loadStateFromServer();
+        render();
+        // Agenda primeira verificação imediatamente
+        checkAll();
+        // Repete verificação a cada 5 minutos (300000ms)
+        setInterval(checkAll, 300000);
+    }
+
+    bootstrapApp();
 </script>
 
 </body>
