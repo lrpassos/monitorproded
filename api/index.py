@@ -247,7 +247,12 @@ HTML_TEMPLATE = '''
     <div class="card">
         <div class="card-header">
             <h5><i class="bi bi-activity"></i> Monitoramento de Hosts</h5>
-            <button class="btn btn-link p-0 text-muted" onclick="checkAll()"><i class="bi bi-arrow-clockwise fs-5"></i></button>
+            <div class="d-flex align-items-center">
+                <button class="btn btn-outline-secondary btn-sm me-2 d-flex align-items-center" onclick="openHistoryModal()" style="font-size: 0.8rem; border-radius: 6px; padding: 4px 8px;">
+                    <i class="bi bi-journal-text me-1"></i> Histórico
+                </button>
+                <button class="btn btn-link p-0 text-muted" onclick="checkAll()"><i class="bi bi-arrow-clockwise fs-5"></i></button>
+            </div>
         </div>
         
         <!-- Desktop Table -->
@@ -334,6 +339,28 @@ HTML_TEMPLATE = '''
     </div>
 </div>
 
+<!-- Modal Histórico Completo (30 Dias) -->
+<div class="modal fade" id="historyModal" tabindex="-1">
+    <div class="modal-dialog modal-lg modal-dialog-centered">
+        <div class="modal-content bg-light text-dark" style="border-radius: 12px;">
+            <div class="modal-header border-bottom">
+                <h6 class="modal-title fw-bold text-dark d-flex align-items-center">
+                    <i class="bi bi-clock-history me-2 text-primary fs-5"></i> Histórico Completo de Perdas (Até 30 Dias)
+                </h6>
+                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body p-4" style="max-height: 400px; overflow-y: auto;">
+                <div id="full-history-content">
+                    <!-- JS -->
+                </div>
+            </div>
+            <div class="modal-footer border-top">
+                <button type="button" class="btn btn-secondary btn-sm" data-bs-dismiss="modal">Fechar</button>
+            </div>
+        </div>
+    </div>
+</div>
+
 <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
 <script>
     let hosts = JSON.parse(localStorage.getItem('proded_monitor_v2')) || [
@@ -342,6 +369,39 @@ HTML_TEMPLATE = '''
     ];
     let logs = JSON.parse(localStorage.getItem('proded_logs_v2')) || [];
     let pingInterval = null;
+
+    function migrateLogs() {
+        let changed = false;
+        logs = logs.map(l => {
+            if (!l.timestamp) {
+                l.timestamp = Date.now();
+                changed = true;
+            }
+            if (!l.time || l.time.indexOf('/') === -1) {
+                l.time = new Date(l.timestamp).toLocaleString('pt-BR');
+                changed = true;
+            }
+            return l;
+        });
+        if (changed) {
+            save();
+        }
+    }
+
+    function cleanupLogs() {
+        const now = Date.now();
+        const thirtyDaysMs = 30 * 24 * 60 * 60 * 1000;
+        const initialCount = logs.length;
+        logs = logs.filter(l => {
+            return (now - l.timestamp) <= thirtyDaysMs;
+        });
+        if (logs.length !== initialCount) {
+            save();
+        }
+    }
+
+    migrateLogs();
+    cleanupLogs();
 
     function save() {
         localStorage.setItem('proded_monitor_v2', JSON.stringify(hosts));
@@ -423,16 +483,65 @@ HTML_TEMPLATE = '''
 
     function renderLogs() {
         const container = document.getElementById('loss-history');
-        if (logs.length === 0) {
-            container.innerHTML = 'Nenhuma perda de ping registrada recentemente.';
+        const now = Date.now();
+        const sevenDaysMs = 7 * 24 * 60 * 60 * 1000;
+        
+        cleanupLogs();
+        
+        const filteredLogs = logs.filter(l => {
+            return (now - l.timestamp) <= sevenDaysMs;
+        });
+        
+        if (filteredLogs.length === 0) {
+            container.innerHTML = 'Nenhuma perda de ping registrada nos últimos 7 dias.';
             return;
         }
-        container.innerHTML = logs.map(l => `
+        container.innerHTML = filteredLogs.map(l => `
             <div class="log-item">
                 <div class="log-time">${l.time}</div>
                 <div class="log-text">Host <strong>${l.label}</strong> (${l.ip}) ficou offline.</div>
             </div>
         `).join('');
+    }
+
+    function openHistoryModal() {
+        cleanupLogs();
+        const modal = new bootstrap.Modal(document.getElementById('historyModal'));
+        const container = document.getElementById('full-history-content');
+        const now = Date.now();
+        const thirtyDaysMs = 30 * 24 * 60 * 60 * 1000;
+        
+        const filteredLogs = logs.filter(l => {
+            return (now - l.timestamp) <= thirtyDaysMs;
+        });
+        
+        if (filteredLogs.length === 0) {
+            container.innerHTML = `<div class="text-center py-4 text-muted italic">Nenhum registro de perda de ping nos últimos 30 dias.</div>`;
+        } else {
+            container.innerHTML = `
+                <div class="table-responsive">
+                    <table class="table table-hover align-middle">
+                        <thead class="table-light">
+                            <tr>
+                                <th style="font-size: 0.75rem;">Data/Hora</th>
+                                <th style="font-size: 0.75rem;">Host / IP</th>
+                                <th style="font-size: 0.75rem;">Status</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            ${filteredLogs.map(l => `
+                                <tr>
+                                    <td class="font-monospace small text-muted">${l.time}</td>
+                                    <td><strong>${l.label}</strong> <code class="small text-secondary">(${l.ip})</code></td>
+                                    <td><span class="badge bg-danger-subtle text-danger" style="font-size: 0.7rem;">OFFLINE</span></td>
+                                </tr>
+                            `).join('')}
+                        </tbody>
+                    </table>
+                </div>
+            `;
+        }
+        modal.show();
     }
 
     function initChart(host, type) {
@@ -481,8 +590,14 @@ HTML_TEMPLATE = '''
                     const isOnline = r.status === 'online';
                     
                     if (wasOnline && !isOnline) {
-                        logs.unshift({ time: new Date().toLocaleTimeString(), ip: h.ip, label: h.label });
-                        logs = logs.slice(0, 10);
+                        const now = Date.now();
+                        logs.unshift({
+                            timestamp: now,
+                            time: new Date(now).toLocaleString('pt-BR'),
+                            ip: h.ip,
+                            label: h.label
+                        });
+                        cleanupLogs();
                     }
                     
                     h.status = r.status;
