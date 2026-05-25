@@ -476,6 +476,18 @@ HTML_TEMPLATE = '''
     let logs = [];
     let pingInterval = null;
 
+    function maskIp(val) {
+        if (!val) return "";
+        const parts = val.split('.');
+        if (parts.length === 4) {
+            const isNumericIp = parts.every(part => /^\d+$/.test(part));
+            if (isNumericIp) {
+                return `***.***.${parts[2]}.${parts[3]}`;
+            }
+        }
+        return val;
+    }
+
     async function loadStateFromServer() {
         try {
             const res = await fetch('/api/state');
@@ -497,8 +509,8 @@ HTML_TEMPLATE = '''
             const isOnline = h.status === 'online';
             return `
                 <tr>
-                    <td><code>${h.ip}</code></td>
-                    <td class="text-muted small">${h.label}</td>
+                    <td><code>${maskIp(h.ip)}</code></td>
+                    <td class="text-muted small">${maskIp(h.label)}</td>
                     <td>
                         <div class="d-flex align-items-center">
                             <span class="status-dot ${isOnline ? 'dot-online' : 'dot-offline'}"></span>
@@ -529,8 +541,8 @@ HTML_TEMPLATE = '''
                 <div class="mobile-card">
                     <div class="mobile-card-header">
                         <div class="mobile-card-info">
-                            <h6><code>${h.ip}</code></h6>
-                            <p>${h.label}</p>
+                            <h6><code>${maskIp(h.ip)}</code></h6>
+                            <p>${maskIp(h.label)}</p>
                         </div>
                         <div class="btn-group">
                             <button class="btn-action" onclick="startPing('${h.ip}')"><i class="bi bi-broadcast"></i></button>
@@ -576,7 +588,7 @@ HTML_TEMPLATE = '''
         container.innerHTML = filteredLogs.map(l => `
             <div class="log-item">
                 <div class="log-time">${l.time}</div>
-                <div class="log-text">Host <strong>${l.label}</strong> (${l.ip}) ficou offline.</div>
+                <div class="log-text">Host <strong>${maskIp(l.label)}</strong> (${maskIp(l.ip)}) ficou offline.</div>
             </div>
         `).join('');
     }
@@ -608,7 +620,7 @@ HTML_TEMPLATE = '''
                             ${filteredLogs.map(l => `
                                 <tr>
                                     <td class="font-monospace small text-muted">${l.time}</td>
-                                    <td><strong>${l.label}</strong> <code class="small text-secondary">(${l.ip})</code></td>
+                                    <td><strong>${maskIp(l.label)}</strong> <code class="small text-secondary">(${maskIp(l.ip)})</code></td>
                                     <td><span class="badge bg-danger-subtle text-danger" style="font-size: 0.7rem;">OFFLINE</span></td>
                                 </tr>
                             `).join('')}
@@ -704,15 +716,17 @@ HTML_TEMPLATE = '''
     async function runTrace(ip) {
         const modal = new bootstrap.Modal(document.getElementById('traceModal'));
         const output = document.getElementById('trace-output');
-        output.innerText = `Iniciando traceroute para ${ip}...`;
+        const masked = maskIp(ip);
+        output.innerText = `Iniciando traceroute para ${masked}...`;
         modal.show();
         
         try {
             const res = await fetch('/api/traceroute/' + ip);
             const data = await res.json();
-            let text = `Traceroute para ${data.host}:\\n\\n`;
+            let text = `Traceroute para ${masked}:\\n\\n`;
             data.hops.forEach(h => {
-                text += `Hop ${h.hop}: ${h.ip.padEnd(15)} | ${h.ms}ms\\n`;
+                const hopIp = h.ip === ip ? masked : h.ip;
+                text += `Hop ${h.hop}: ${hopIp.padEnd(15)} | ${h.ms}ms\\n`;
             });
             output.innerText = text;
         } catch (e) {
@@ -723,7 +737,8 @@ HTML_TEMPLATE = '''
     function startPing(ip) {
         const modal = new bootstrap.Modal(document.getElementById('pingModal'));
         const output = document.getElementById('ping-output');
-        output.innerHTML = `Disparando contra ${ip} com 32 bytes de dados:\\n`;
+        const masked = maskIp(ip);
+        output.innerHTML = `Disparando contra ${masked} com 32 bytes de dados:\\n`;
         modal.show();
         
         if (pingInterval) clearInterval(pingInterval);
@@ -735,7 +750,7 @@ HTML_TEMPLATE = '''
                 
                 let line = '';
                 if (data.status === 'online') {
-                    line = `Resposta de ${ip}: bytes=32 tempo=${data.latency}ms TTL=54\\n`;
+                    line = `Resposta de ${masked}: bytes=32 tempo=${data.latency}ms TTL=54\\n`;
                 } else {
                     line = `Esgotado o tempo de limite do pedido.\\n`;
                 }
