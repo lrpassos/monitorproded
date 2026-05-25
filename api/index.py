@@ -112,6 +112,39 @@ def delete_host(host_id):
     save_state()
     return jsonify(GLOBAL_STATE)
 
+@app.route('/api/hosts/sync', methods=['POST'])
+def sync_hosts():
+    load_state()
+    data = request.json or {}
+    client_hosts = data.get('hosts', [])
+    client_logs = data.get('logs', [])
+    with STATE_LOCK:
+        if isinstance(client_hosts, list) and len(client_hosts) > 0:
+            valid_hosts = []
+            for h in client_hosts:
+                if isinstance(h, dict) and 'ip' in h:
+                    valid_hosts.append({
+                        "id": str(h.get('id', int(time.time() * 1000))),
+                        "ip": str(h.get('ip')),
+                        "label": str(h.get('label', h.get('ip'))),
+                        "status": str(h.get('status', 'unknown')),
+                        "history": list(h.get('history', []))
+                    })
+            if valid_hosts:
+                # Se mudou os hosts cadastrados, sincroniza
+                GLOBAL_STATE["hosts"] = valid_hosts
+
+        if isinstance(client_logs, list) and len(client_logs) > 0:
+            existing_timestamps = {l.get('timestamp') for l in GLOBAL_STATE.get('logs', []) if l.get('timestamp')}
+            for l in client_logs:
+                if isinstance(l, dict) and l.get('timestamp') not in existing_timestamps:
+                    GLOBAL_STATE['logs'].append(l)
+            GLOBAL_STATE['logs'].sort(key=lambda x: x.get('timestamp', 0), reverse=True)
+            GLOBAL_STATE['logs'] = GLOBAL_STATE['logs'][:100] # Limite para últimos 100 logs
+        
+        save_state()
+    return jsonify(GLOBAL_STATE)
+
 def check_status_internal():
     """Realiza verificação de latência de todos os hosts e registra logs de queda no backend com thread safety."""
     with STATE_LOCK:
@@ -512,6 +545,15 @@ HTML_TEMPLATE = '''
     let logs = [];
     let pingInterval = null;
 
+    function saveStateToLocalStorage() {
+        try {
+            localStorage.setItem('proded_hosts_v1', JSON.stringify(hosts));
+            localStorage.setItem('proded_logs_v1', JSON.stringify(logs));
+        } catch (e) {
+            console.error("Erro ao salvar no localStorage:", e);
+        }
+    }
+
     function maskIp(val) {
         if (!val) return "";
         const parts = val.split('.');
@@ -528,10 +570,47 @@ HTML_TEMPLATE = '''
         try {
             const res = await fetch('/api/state');
             const data = await res.json();
-            hosts = data.hosts || [];
-            logs = data.logs || [];
+            
+            const localHostsStr = localStorage.getItem('proded_hosts_v1');
+            const localLogsStr = localStorage.getItem('proded_logs_v1');
+            let localHosts = [];
+            let localLogs = [];
+            if (localHostsStr) {
+                try { localHosts = JSON.parse(localHostsStr) || []; } catch(err) {}
+            }
+            if (localLogsStr) {
+                try { localLogs = JSON.parse(localLogsStr) || []; } catch(err) {}
+            }
+
+            const serverHosts = data.hosts || [];
+            const isServerClean = serverHosts.length <= 2 && serverHosts.every(sh => sh.ip === '8.8.8.8' || sh.ip === '1.1.1.1');
+            const hasLocalCustomData = localHosts.length > 0 && !(localHosts.length === 2 && localHosts.every(lh => lh.ip === '8.8.8.8' || lh.ip === '1.1.1.1'));
+
+            if (isServerClean && hasLocalCustomData) {
+                const syncRes = await fetch('/api/hosts/sync', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({ hosts: localHosts, logs: localLogs })
+                });
+                const syncData = await syncRes.json();
+                hosts = syncData.hosts || [];
+                logs = syncData.logs || [];
+                saveStateToLocalStorage();
+            } else {
+                hosts = serverHosts;
+                logs = data.logs || [];
+                saveStateToLocalStorage();
+            }
         } catch (e) {
             console.error("Erro ao carregar estado do servidor:", e);
+            const localHostsStr = localStorage.getItem('proded_hosts_v1');
+            const localLogsStr = localStorage.getItem('proded_logs_v1');
+            if (localHostsStr) {
+                try { hosts = JSON.parse(localHostsStr) || []; } catch(err) {}
+            }
+            if (localLogsStr) {
+                try { logs = JSON.parse(localLogsStr) || []; } catch(err) {}
+            }
         }
     }
 
@@ -620,6 +699,7 @@ HTML_TEMPLATE = '''
             initChart(h, 'desktop');
             initChart(h, 'mobile');
         });
+        saveStateToLocalStorage();
     }
 
     function renderLogs() {
