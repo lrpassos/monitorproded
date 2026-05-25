@@ -3,6 +3,7 @@ import socket
 import time
 import json
 import threading
+from datetime import datetime, timezone, timedelta
 from flask import Flask, jsonify, render_template_string, request
 from flask_cors import CORS
 
@@ -93,7 +94,11 @@ def check_status_internal():
         load_state()
         hosts = GLOBAL_STATE.get('hosts', [])
         logs = GLOBAL_STATE.get('logs', [])
-        now_ms = int(time.time() * 1000)
+        
+        # Horário de Brasília (UTC-3)
+        gmt_3 = timezone(timedelta(hours=-3))
+        dt_now = datetime.now(gmt_3)
+        now_ms = int(dt_now.timestamp() * 1000)
         
         # Limites para logs
         thirty_days_ms = 30 * 24 * 60 * 60 * 1000
@@ -153,7 +158,7 @@ def check_status_internal():
             if was_online and not is_online:
                 new_log = {
                     "timestamp": now_ms,
-                    "time": time.strftime("%d/%m/%Y %H:%M:%S"),
+                    "time": dt_now.strftime("%d/%m/%Y %H:%M:%S"),
                     "ip": ip,
                     "label": host.get('label', ip)
                 }
@@ -213,10 +218,12 @@ def ping_single(host):
     except:
         pass
         
+    gmt_3 = timezone(timedelta(hours=-3))
+    time_str = datetime.now(gmt_3).strftime("%H:%M:%S")
     return jsonify({
         "status": "online" if is_online else "offline",
         "latency": latency if is_online else None,
-        "time": time.strftime("%H:%M:%S")
+        "time": time_str
     })
 
 @app.route('/api/traceroute/<host>')
