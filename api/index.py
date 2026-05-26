@@ -24,7 +24,8 @@ DEFAULT_HOSTS = [
 
 GLOBAL_STATE = {
     "hosts": DEFAULT_HOSTS,
-    "logs": []
+    "logs": [],
+    "deleted_hosts": []
 }
 
 def load_state():
@@ -37,6 +38,8 @@ def load_state():
                     data = json.load(f)
                     if isinstance(data, dict) and 'hosts' in data and 'logs' in data:
                         GLOBAL_STATE = data
+                        if "deleted_hosts" not in GLOBAL_STATE:
+                            GLOBAL_STATE["deleted_hosts"] = []
                         return
             except Exception as e:
                 print("Erro ao carregar estado persistente:", e)
@@ -48,6 +51,8 @@ def load_state():
                     data = json.load(f)
                     if isinstance(data, dict) and 'hosts' in data and 'logs' in data:
                         GLOBAL_STATE = data
+                        if "deleted_hosts" not in GLOBAL_STATE:
+                            GLOBAL_STATE["deleted_hosts"] = []
                         # Salva imediatamente no persistente
                         try:
                             with open(PERSISTENT_STATE_FILE, 'w') as out_f:
@@ -62,7 +67,8 @@ def load_state():
         # 3. Se nenhum existir, inicializa com o estado padrão
         GLOBAL_STATE = {
             "hosts": DEFAULT_HOSTS,
-            "logs": []
+            "logs": [],
+            "deleted_hosts": []
         }
 
 def save_state():
@@ -108,8 +114,14 @@ def add_host():
 @app.route('/api/hosts/delete/<host_id>', methods=['POST', 'DELETE'])
 def delete_host(host_id):
     load_state()
-    GLOBAL_STATE["hosts"] = [h for h in GLOBAL_STATE["hosts"] if str(h.get('id')) != str(host_id)]
-    save_state()
+    with STATE_LOCK:
+        if "deleted_hosts" not in GLOBAL_STATE:
+            GLOBAL_STATE["deleted_hosts"] = []
+        host_id_str = str(host_id)
+        if host_id_str not in GLOBAL_STATE["deleted_hosts"]:
+            GLOBAL_STATE["deleted_hosts"].append(host_id_str)
+        GLOBAL_STATE["hosts"] = [h for h in GLOBAL_STATE["hosts"] if str(h.get('id')) != host_id_str]
+        save_state()
     return jsonify(GLOBAL_STATE)
 
 @app.route('/api/hosts/sync', methods=['POST'])
@@ -119,12 +131,16 @@ def sync_hosts():
     client_hosts = data.get('hosts', [])
     client_logs = data.get('logs', [])
     with STATE_LOCK:
+        deleted_list = GLOBAL_STATE.get("deleted_hosts", [])
         if isinstance(client_hosts, list) and len(client_hosts) > 0:
             valid_hosts = []
             for h in client_hosts:
                 if isinstance(h, dict) and 'ip' in h:
+                    h_id = str(h.get('id', int(time.time() * 1000)))
+                    if h_id in deleted_list:
+                        continue
                     valid_hosts.append({
-                        "id": str(h.get('id', int(time.time() * 1000))),
+                        "id": h_id,
                         "ip": str(h.get('ip')),
                         "label": str(h.get('label', h.get('ip'))),
                         "status": str(h.get('status', 'unknown')),
@@ -543,12 +559,14 @@ HTML_TEMPLATE = '''
 <script>
     let hosts = [];
     let logs = [];
+    let deleted_hosts = [];
     let pingInterval = null;
 
     function saveStateToLocalStorage() {
         try {
             localStorage.setItem('proded_hosts_v1', JSON.stringify(hosts));
             localStorage.setItem('proded_logs_v1', JSON.stringify(logs));
+            localStorage.setItem('proded_deleted_hosts_v1', JSON.stringify(deleted_hosts));
         } catch (e) {
             console.error("Erro ao salvar no localStorage:", e);
         }
@@ -571,8 +589,14 @@ HTML_TEMPLATE = '''
             const res = await fetch('/api/state');
             const data = await res.json();
             
+            if (data.deleted_hosts) {
+                deleted_hosts = data.deleted_hosts;
+            }
+            
             const localHostsStr = localStorage.getItem('proded_hosts_v1');
             const localLogsStr = localStorage.getItem('proded_logs_v1');
+            const localDeletedStr = localStorage.getItem('proded_deleted_hosts_v1');
+            
             let localHosts = [];
             let localLogs = [];
             if (localHostsStr) {
@@ -581,6 +605,20 @@ HTML_TEMPLATE = '''
             if (localLogsStr) {
                 try { localLogs = JSON.parse(localLogsStr) || []; } catch(err) {}
             }
+            if (localDeletedStr) {
+                try { 
+                    const parsedDeleted = JSON.parse(localDeletedStr) || [];
+                    parsedDeleted.forEach(id => {
+                        const idStr = String(id);
+                        if (!deleted_hosts.includes(idStr)) {
+                            deleted_hosts.push(idStr);
+                        }
+                    });
+                } catch(err) {}
+            }
+
+            // Filtra os hosts locais que já foram excluídos definitivamente
+            localHosts = localHosts.filter(lh => !deleted_hosts.includes(String(lh.id)));
 
             const serverHosts = data.hosts || [];
             const isServerClean = serverHosts.length <= 2 && serverHosts.every(sh => sh.ip === '8.8.8.8' || sh.ip === '1.1.1.1');
@@ -595,6 +633,9 @@ HTML_TEMPLATE = '''
                 const syncData = await syncRes.json();
                 hosts = syncData.hosts || [];
                 logs = syncData.logs || [];
+                if (syncData.deleted_hosts) {
+                    deleted_hosts = syncData.deleted_hosts;
+                }
                 saveStateToLocalStorage();
             } else {
                 hosts = serverHosts;
@@ -606,7 +647,10 @@ HTML_TEMPLATE = '''
             const localHostsStr = localStorage.getItem('proded_hosts_v1');
             const localLogsStr = localStorage.getItem('proded_logs_v1');
             if (localHostsStr) {
-                try { hosts = JSON.parse(localHostsStr) || []; } catch(err) {}
+                try { 
+                    hosts = JSON.parse(localHostsStr) || []; 
+                    hosts = hosts.filter(lh => !deleted_hosts.includes(String(lh.id)));
+                } catch(err) {}
             }
             if (localLogsStr) {
                 try { logs = JSON.parse(localLogsStr) || []; } catch(err) {}
@@ -843,12 +887,25 @@ HTML_TEMPLATE = '''
     async function removeHost(id) {
         if (!confirm('Deseja realmente remover este host?')) return;
         try {
+            const idStr = String(id);
+            if (!deleted_hosts.includes(idStr)) {
+                deleted_hosts.push(idStr);
+            }
+            // Atualiza localmente de imediato para feedback visual instantâneo
+            hosts = hosts.filter(h => String(h.id) !== idStr);
+            saveStateToLocalStorage();
+            render();
+
             const res = await fetch('/api/hosts/delete/' + id, {
                 method: 'POST'
             });
             const data = await res.json();
             hosts = data.hosts || [];
             logs = data.logs || [];
+            if (data.deleted_hosts) {
+                deleted_hosts = data.deleted_hosts;
+            }
+            saveStateToLocalStorage();
             render();
         } catch (e) {
             console.error("Erro ao remover host:", e);
