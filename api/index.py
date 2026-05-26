@@ -3,6 +3,8 @@ import socket
 import time
 import json
 import threading
+import concurrent.futures
+import copy
 from datetime import datetime, timezone, timedelta
 from flask import Flask, jsonify, render_template_string, request
 from flask_cors import CORS
@@ -181,95 +183,136 @@ def sync_hosts():
         save_state()
     return jsonify(GLOBAL_STATE)
 
+def check_single_host_thread(host):
+    ip = host.get('ip')
+    was_online = host.get('status') == 'online'
+    is_online = False
+    latency = 0
+    
+    try:
+        # Resolve DNS rápido
+        target_ip = socket.gethostbyname(ip)
+        
+        # Testas portas comuns sequencialmente com timeout super reduzido de 0.4s.
+        # Caso conecte em qualquer uma, encerra imediatamente com sucesso.
+        ports_to_try = [80, 443, 22, 8291, 23]
+        for port in ports_to_try:
+            try:
+                start_time = time.time()
+                with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+                    s.settimeout(0.4)
+                    s.connect((target_ip, port))
+                    latency = round((time.time() - start_time) * 1000, 1)
+                    is_online = True
+                    break
+            except Exception:
+                continue
+                
+        # Contingência porta 80 por garantia caso esteja offline
+        if not is_online:
+            for _ in range(2):
+                try:
+                    start_time = time.time()
+                    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+                        s.settimeout(0.4)
+                        s.connect((target_ip, 80))
+                        latency = round((time.time() - start_time) * 1000, 1)
+                        is_online = True
+                        break
+                except Exception:
+                    time.sleep(0.05)
+    except Exception:
+        pass
+        
+    return {
+        "id": host.get("id"),
+        "ip": ip,
+        "is_online": is_online,
+        "latency": latency,
+        "was_online": was_online,
+        "label": host.get("label", ip)
+    }
+
 def check_status_internal():
-    """Realiza verificação de latência de todos os hosts e registra logs de queda no backend com thread safety."""
+    """Realiza verificação de latência de todos os hosts concorrentemente em segundo plano para máxima performance."""
+    # 1. Carrega o estado atual de forma rápida e segura e tira uma cópia para trabalhar sem travar outras requests
     with STATE_LOCK:
         load_state()
+        hosts_snapshot = copy.deepcopy(GLOBAL_STATE.get('hosts', []))
+        
+    if not hosts_snapshot:
+        return
+        
+    gmt_3 = timezone(timedelta(hours=-3))
+    dt_now = datetime.now(gmt_3)
+    now_ms = int(dt_now.timestamp() * 1000)
+    thirty_days_ms = 30 * 24 * 60 * 60 * 1000
+    
+    # 2. Realiza o teste de rede de forma concorrente para todos os hosts ao mesmo tempo,
+    # SEM segurar o lock do estado global do servidor. Isso evita congelamento da interface do usuário.
+    checked_results = []
+    with concurrent.futures.ThreadPoolExecutor(max_workers=max(1, len(hosts_snapshot))) as executor:
+        futures = {executor.submit(check_single_host_thread, host): host for host in hosts_snapshot}
+        for future in concurrent.futures.as_completed(futures):
+            try:
+                res = future.result()
+                checked_results.append(res)
+            except Exception as e:
+                print("Erro ao verificar latência do host concorrentemente:", e)
+                
+    # Mapeia os resultados da verificação para atualização rápida
+    results_by_id = {r["id"]: r for r in checked_results}
+    
+    # 3. Adquire o lock novamente apenas para aplicar as alterações de forma segura
+    with STATE_LOCK:
+        load_state() # recarrega caso tenham adicionado ou removido hosts durante a pingagem
         hosts = GLOBAL_STATE.get('hosts', [])
         logs = GLOBAL_STATE.get('logs', [])
         
-        # Horário de Brasília (UTC-3)
-        gmt_3 = timezone(timedelta(hours=-3))
-        dt_now = datetime.now(gmt_3)
-        now_ms = int(dt_now.timestamp() * 1000)
-        
-        # Limites para logs
-        thirty_days_ms = 30 * 24 * 60 * 60 * 1000
-        
         for host in hosts:
-            ip = host.get('ip')
-            was_online = host.get('status') == 'online'
-            is_online = False
-            latency = 0
-            
-            try:
-                target_ip = socket.gethostbyname(ip)
-                socket.setdefaulttimeout(TIMEOUT)
+            h_id = host.get("id")
+            if h_id in results_by_id:
+                res = results_by_id[h_id]
+                is_online = res["is_online"]
+                latency = res["latency"]
+                was_online = res["was_online"]
+                ip = res["ip"]
                 
-                # Portas para tentar conexão TCP
-                ports_to_try = [80, 443, 22, 8291, 23]
-                for port in ports_to_try:
-                    try:
-                        start_time = time.time()
-                        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
-                            s.connect((target_ip, port))
-                            latency = round((time.time() - start_time) * 1000, 1)
-                            is_online = True
-                            break
-                    except:
-                        continue
+                status = "online" if is_online else "offline"
+                host["status"] = status
                 
-                # Segunda tentativa de contingência na porta 80 por garantia
-                if not is_online:
-                    for _ in range(2):
-                        try:
-                            start_time = time.time()
-                            with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
-                                s.connect((target_ip, 80))
-                                latency = round((time.time() - start_time) * 1000, 1)
-                                is_online = True
-                                break
-                        except:
-                            time.sleep(0.1)
-            except:
-                pass
-            
-            status = "online" if is_online else "offline"
-            host["status"] = status
-            
-            if "history" not in host or not isinstance(host["history"], list):
-                host["history"] = []
+                if "history" not in host or not isinstance(host["history"], list):
+                    host["history"] = []
+                    
+                if is_online:
+                    host["history"].append(latency if latency > 0 else 10)
+                else:
+                    host["history"].append(0)
+                    
+                host["history"] = host["history"][-30:]
                 
-            if is_online:
-                host["history"].append(latency if latency > 0 else 10)
-            else:
-                host["history"].append(0)
-                
-            host["history"] = host["history"][-30:] # Guarda últimos 30 pings no gráfico
-            
-            # Lógica de queda de ping (Muda de online para offline)
-            if was_online and not is_online:
-                new_log = {
-                    "timestamp": now_ms,
-                    "time": dt_now.strftime("%d/%m/%Y %H:%M:%S"),
-                    "ip": ip,
-                    "label": host.get('label', ip),
-                    "type": "offline"
-                }
-                logs.insert(0, new_log)
-            # Lógica de latência alta (Online com ping acima de 300ms)
-            elif is_online and latency > 300:
-                new_log = {
-                    "timestamp": now_ms,
-                    "time": dt_now.strftime("%d/%m/%Y %H:%M:%S"),
-                    "ip": ip,
-                    "label": host.get('label', ip),
-                    "type": "high_latency",
-                    "latency": latency
-                }
-                logs.insert(0, new_log)
-                
-        # Remove logs com mais de 30 dias de registro
+                # Registra logs de transição ou alerta
+                if was_online and not is_online:
+                    new_log = {
+                        "timestamp": now_ms,
+                        "time": dt_now.strftime("%d/%m/%Y %H:%M:%S"),
+                        "ip": ip,
+                        "label": host.get('label', ip),
+                        "type": "offline"
+                    }
+                    logs.insert(0, new_log)
+                elif is_online and latency > 300:
+                    new_log = {
+                        "timestamp": now_ms,
+                        "time": dt_now.strftime("%d/%m/%Y %H:%M:%S"),
+                        "ip": ip,
+                        "label": host.get('label', ip),
+                        "type": "high_latency",
+                        "latency": latency
+                    }
+                    logs.insert(0, new_log)
+                    
+        # Limpa logs velhos com mais de 30 dias de registro
         logs = [l for l in logs if (now_ms - l.get('timestamp', 0)) <= thirty_days_ms]
         
         GLOBAL_STATE['hosts'] = hosts
@@ -308,12 +351,12 @@ def ping_single(host):
     latency = 0
     try:
         target_ip = socket.gethostbyname(host)
-        socket.setdefaulttimeout(TIMEOUT)
         
         for port in [80, 443, 22, 8291]:
             try:
                 start = time.time()
                 with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+                    s.settimeout(0.4)
                     s.connect((target_ip, port))
                     latency = round((time.time() - start) * 1000, 1)
                     is_online = True
