@@ -5,6 +5,8 @@ import json
 import threading
 import concurrent.futures
 import copy
+import urllib.request
+import urllib.error
 from datetime import datetime, timezone, timedelta
 from flask import Flask, jsonify, render_template_string, request
 from flask_cors import CORS
@@ -19,6 +21,10 @@ TMP_STATE_FILE = '/tmp/proded_state.json'
 STATE_FILE = TMP_STATE_FILE
 STATE_LOCK = threading.RLock()
 
+# Executor dedicado a salvar na nuvem assincronamente em segundo plano, para não travar respostas HTTP dos usuários
+PERSISTENCE_EXECUTOR = concurrent.futures.ThreadPoolExecutor(max_workers=1)
+KVDB_URL = "https://kvdb.io/vT7Y3nL9kH8R4pQ2S1mA/d758503052ef40e4ac3a0851e8ccc95b_state_v3"
+
 DEFAULT_HOSTS = [
     { 'id': '1', 'ip': '8.8.8.8', 'label': 'Google DNS', 'history': [], 'status': 'unknown' },
     { 'id': '2', 'ip': '1.1.1.1', 'label': 'Cloudflare DNS', 'history': [], 'status': 'unknown' }
@@ -30,10 +36,42 @@ GLOBAL_STATE = {
     "deleted_hosts": []
 }
 
+def fetch_remote_state():
+    """Busca o estado persistente armazenado na nuvem pública de maneira segura."""
+    try:
+        req = urllib.request.Request(KVDB_URL, headers={'User-Agent': 'Mozilla/5.0'})
+        with urllib.request.urlopen(req, timeout=3.5) as response:
+            if response.status == 200:
+                raw_data = response.read().decode('utf-8')
+                data = json.loads(raw_data)
+                if isinstance(data, dict) and 'hosts' in data and 'logs' in data:
+                    return data
+    except urllib.error.HTTPError as e:
+        if e.code != 404:
+            print("Erro HTTP ao carregar estado remoto:", e.code)
+    except Exception as e:
+        print("Erro de conexao ao carregar estado remoto na nuvem:", e)
+    return None
+
+def save_remote_state_worker(data_copy):
+    """Envia assincronamente a cópia dos dados para a nuvem sem atrasar a thread de requisição do usuário."""
+    try:
+        payload = json.dumps(data_copy).encode('utf-8')
+        req = urllib.request.Request(
+            KVDB_URL,
+            data=payload,
+            headers={'Content-Type': 'application/json', 'User-Agent': 'Mozilla/5.0'},
+            method='POST'
+        )
+        with urllib.request.urlopen(req, timeout=4) as response:
+            pass
+    except Exception as e:
+        print("Erro ao sincronizar estado assincronamente na nuvem:", e)
+
 def load_state():
     global GLOBAL_STATE
     with STATE_LOCK:
-        # 1. Tenta carregar do arquivo temporário (/tmp/proded_state.json), que é sempre gravável
+        # 1. Tenta carregar do arquivo temporário local, que é o mais rápido (warm containers)
         if os.path.exists(TMP_STATE_FILE):
             try:
                 with open(TMP_STATE_FILE, 'r') as f:
@@ -46,7 +84,21 @@ def load_state():
             except Exception as e:
                 print("Erro ao carregar estado do arquivo temporario:", e)
 
-        # 2. Tenta carregar do arquivo persistente se existir
+        # 2. Se o arquivo temporário não existe (por exemplo, após coldstart no Vercel), carrega da nuvem
+        remote_data = fetch_remote_state()
+        if remote_data:
+            GLOBAL_STATE = remote_data
+            if "deleted_hosts" not in GLOBAL_STATE:
+                GLOBAL_STATE["deleted_hosts"] = []
+            # Salva no arquivo temporário local para as requisições warm subsequentes serem instantâneas
+            try:
+                with open(TMP_STATE_FILE, 'w') as out_f:
+                    json.dump(GLOBAL_STATE, out_f)
+            except:
+                pass
+            return
+
+        # 3. Tenta carregar do arquivo persistente do disco local em último caso se existir
         if os.path.exists(PERSISTENT_STATE_FILE):
             try:
                 with open(PERSISTENT_STATE_FILE, 'r') as f:
@@ -55,7 +107,7 @@ def load_state():
                         GLOBAL_STATE = data
                         if "deleted_hosts" not in GLOBAL_STATE:
                             GLOBAL_STATE["deleted_hosts"] = []
-                        # Salva imediatamente no TMP_STATE_FILE para garantir que seja gravável
+                        # Salva imediatamente no TMP_STATE_FILE para garantir
                         try:
                             with open(TMP_STATE_FILE, 'w') as out_f:
                                 json.dump(GLOBAL_STATE, out_f)
@@ -63,22 +115,9 @@ def load_state():
                             pass
                         return
             except Exception as e:
-                print("Erro ao carregar estado persistente:", e)
+                print("Erro ao carregar estado persistente local:", e)
 
-        # 3. Se os arquivos não existem fisicamente, mas já temos dados na memória do processo, não resete!
-        if GLOBAL_STATE and isinstance(GLOBAL_STATE, dict) and len(GLOBAL_STATE.get("hosts", [])) > 0:
-            hosts = GLOBAL_STATE.get("hosts", [])
-            is_clean = len(hosts) <= 2 and all(h.get('ip') in ['8.8.8.8', '1.1.1.1'] for h in hosts)
-            if not is_clean:
-                # Temos dados em memória, salva para garantir persistência futura no TMP
-                try:
-                    with open(TMP_STATE_FILE, 'w') as f:
-                        json.dump(GLOBAL_STATE, f)
-                except:
-                    pass
-                return
-
-        # 4. Se nenhum existir e não há dados em memória, inicializa com o estado padrão
+        # 4. Caso contrário, se for a primeira inicialização absoluta, usa os hosts padrão
         GLOBAL_STATE = {
             "hosts": DEFAULT_HOSTS,
             "logs": [],
@@ -87,19 +126,23 @@ def load_state():
 
 def save_state():
     with STATE_LOCK:
-        # Salva no arquivo temporário (/tmp/proded_state.json) que é garantido de ser gravável
+        # Salva instantaneamente no arquivo temporário local
         try:
             with open(STATE_FILE, 'w') as f:
                 json.dump(GLOBAL_STATE, f)
         except Exception as e:
-            print("Erro ao salvar estado no arquivo temporário:", e)
+            print("Erro ao salvar estado localmente:", e)
             
-        # Tenta também salvar no persistente (pode falhar por ser somente leitura, sem problemas)
+        # Tenta também salvar no persistente estático local por precaução
         try:
             with open(PERSISTENT_STATE_FILE, 'w') as f:
                 json.dump(GLOBAL_STATE, f)
         except Exception as e:
             pass
+            
+        # Sincroniza em segundo plano na nuvem assincronamente para ultra performance
+        data_copy = copy.deepcopy(GLOBAL_STATE)
+        PERSISTENCE_EXECUTOR.submit(save_remote_state_worker, data_copy)
 
 # Inicializa o estado
 load_state()
@@ -625,6 +668,23 @@ HTML_TEMPLATE = '''
     let deleted_hosts = [];
     let pingInterval = null;
 
+    // Tenta carregar sincronicamente dos dados salvos no navegador para exibição ultra rápida imediata
+    try {
+        const localDeletedStr = localStorage.getItem('proded_deleted_hosts_v1');
+        if (localDeletedStr) deleted_hosts = JSON.parse(localDeletedStr) || [];
+        
+        const localHostsStr = localStorage.getItem('proded_hosts_v1');
+        if (localHostsStr) {
+            hosts = JSON.parse(localHostsStr) || [];
+            hosts = hosts.filter(lh => !deleted_hosts.includes(String(lh.id)));
+        }
+        
+        const localLogsStr = localStorage.getItem('proded_logs_v1');
+        if (localLogsStr) logs = JSON.parse(localLogsStr) || [];
+    } catch (err) {
+        console.error("Erro na leitura rápida inicial:", err);
+    }
+
     function saveStateToLocalStorage() {
         try {
             localStorage.setItem('proded_hosts_v1', JSON.stringify(hosts));
@@ -1064,11 +1124,17 @@ HTML_TEMPLATE = '''
     }
 
     async function bootstrapApp() {
+        // 1. Renderiza os dados locais salvos instantaneamente para performance máxima de inicialização
+        render();
+        
+        // 2. Busca e atualiza com os dados reais/vivos do servidor em background
         await loadStateFromServer();
         render();
-        // Agenda primeira verificação imediatamente
+        
+        // 3. Agenda primeira verificação de ping imediatamente
         checkAll();
-        // Repete verificação a cada 5 minutos (300000ms)
+        
+        // 4. Repete verificação a cada 5 minutos (300000ms)
         setInterval(checkAll, 300000);
     }
 
