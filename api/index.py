@@ -14,7 +14,7 @@ TIMEOUT = 1
 PERSISTENT_STATE_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'proded_state.json')
 TMP_STATE_FILE = '/tmp/proded_state.json'
 
-STATE_FILE = PERSISTENT_STATE_FILE
+STATE_FILE = TMP_STATE_FILE
 STATE_LOCK = threading.RLock()
 
 DEFAULT_HOSTS = [
@@ -31,20 +31,7 @@ GLOBAL_STATE = {
 def load_state():
     global GLOBAL_STATE
     with STATE_LOCK:
-        # 1. Tenta carregar do arquivo de dados persistente (Base de dados em arquivo JSON no projeto)
-        if os.path.exists(PERSISTENT_STATE_FILE):
-            try:
-                with open(PERSISTENT_STATE_FILE, 'r') as f:
-                    data = json.load(f)
-                    if isinstance(data, dict) and 'hosts' in data and 'logs' in data:
-                        GLOBAL_STATE = data
-                        if "deleted_hosts" not in GLOBAL_STATE:
-                            GLOBAL_STATE["deleted_hosts"] = []
-                        return
-            except Exception as e:
-                print("Erro ao carregar estado persistente:", e)
-        
-        # 2. Se não existir, tenta migrar do temporário para manter o histórico e IPs sem limpar os registros do usuario!
+        # 1. Tenta carregar do arquivo temporário (/tmp/proded_state.json), que é sempre gravável
         if os.path.exists(TMP_STATE_FILE):
             try:
                 with open(TMP_STATE_FILE, 'r') as f:
@@ -53,18 +40,43 @@ def load_state():
                         GLOBAL_STATE = data
                         if "deleted_hosts" not in GLOBAL_STATE:
                             GLOBAL_STATE["deleted_hosts"] = []
-                        # Salva imediatamente no persistente
-                        try:
-                            with open(PERSISTENT_STATE_FILE, 'w') as out_f:
-                                json.dump(GLOBAL_STATE, out_f)
-                            print("Estado migrado de temporário para persistente com sucesso!")
-                        except Exception as save_err:
-                            print("Erro ao gravar estado migrado:", save_err)
                         return
             except Exception as e:
-                print("Erro ao tentar ler estado temporário para migração:", e)
+                print("Erro ao carregar estado do arquivo temporario:", e)
 
-        # 3. Se nenhum existir, inicializa com o estado padrão
+        # 2. Tenta carregar do arquivo persistente se existir
+        if os.path.exists(PERSISTENT_STATE_FILE):
+            try:
+                with open(PERSISTENT_STATE_FILE, 'r') as f:
+                    data = json.load(f)
+                    if isinstance(data, dict) and 'hosts' in data and 'logs' in data:
+                        GLOBAL_STATE = data
+                        if "deleted_hosts" not in GLOBAL_STATE:
+                            GLOBAL_STATE["deleted_hosts"] = []
+                        # Salva imediatamente no TMP_STATE_FILE para garantir que seja gravável
+                        try:
+                            with open(TMP_STATE_FILE, 'w') as out_f:
+                                json.dump(GLOBAL_STATE, out_f)
+                        except:
+                            pass
+                        return
+            except Exception as e:
+                print("Erro ao carregar estado persistente:", e)
+
+        # 3. Se os arquivos não existem fisicamente, mas já temos dados na memória do processo, não resete!
+        if GLOBAL_STATE and isinstance(GLOBAL_STATE, dict) and len(GLOBAL_STATE.get("hosts", [])) > 0:
+            hosts = GLOBAL_STATE.get("hosts", [])
+            is_clean = len(hosts) <= 2 and all(h.get('ip') in ['8.8.8.8', '1.1.1.1'] for h in hosts)
+            if not is_clean:
+                # Temos dados em memória, salva para garantir persistência futura no TMP
+                try:
+                    with open(TMP_STATE_FILE, 'w') as f:
+                        json.dump(GLOBAL_STATE, f)
+                except:
+                    pass
+                return
+
+        # 4. Se nenhum existir e não há dados em memória, inicializa com o estado padrão
         GLOBAL_STATE = {
             "hosts": DEFAULT_HOSTS,
             "logs": [],
@@ -73,11 +85,19 @@ def load_state():
 
 def save_state():
     with STATE_LOCK:
+        # Salva no arquivo temporário (/tmp/proded_state.json) que é garantido de ser gravável
         try:
             with open(STATE_FILE, 'w') as f:
                 json.dump(GLOBAL_STATE, f)
         except Exception as e:
-            print("Erro ao salvar estado no arquivo:", e)
+            print("Erro ao salvar estado no arquivo temporário:", e)
+            
+        # Tenta também salvar no persistente (pode falhar por ser somente leitura, sem problemas)
+        try:
+            with open(PERSISTENT_STATE_FILE, 'w') as f:
+                json.dump(GLOBAL_STATE, f)
+        except Exception as e:
+            pass
 
 # Inicializa o estado
 load_state()
@@ -584,6 +604,18 @@ HTML_TEMPLATE = '''
         return val;
     }
 
+    function isHostsClean(list) {
+        if (!list || list.length === 0) return true;
+        if (list.length > 2) return false;
+        return list.every(h => h.ip === '8.8.8.8' || h.ip === '1.1.1.1');
+    }
+
+    function hasCustomHosts(list) {
+        if (!list || list.length === 0) return false;
+        if (list.length !== 2) return true;
+        return !list.every(h => h.ip === '8.8.8.8' || h.ip === '1.1.1.1');
+    }
+
     async function loadStateFromServer() {
         try {
             const res = await fetch('/api/state');
@@ -621,14 +653,12 @@ HTML_TEMPLATE = '''
             localHosts = localHosts.filter(lh => !deleted_hosts.includes(String(lh.id)));
 
             const serverHosts = data.hosts || [];
-            const isServerClean = serverHosts.length <= 2 && serverHosts.every(sh => sh.ip === '8.8.8.8' || sh.ip === '1.1.1.1');
-            const hasLocalCustomData = localHosts.length > 0 && !(localHosts.length === 2 && localHosts.every(lh => lh.ip === '8.8.8.8' || lh.ip === '1.1.1.1'));
 
-            if (isServerClean && hasLocalCustomData) {
+            if (isHostsClean(serverHosts) && hasCustomHosts(localHosts)) {
                 const syncRes = await fetch('/api/hosts/sync', {
                     method: 'POST',
                     headers: {'Content-Type': 'application/json'},
-                    body: JSON.stringify({ hosts: localHosts, logs: localLogs })
+                    body: JSON.stringify({ hosts: localHosts, logs: localLogs, deleted_hosts: deleted_hosts })
                 });
                 const syncData = await syncRes.json();
                 hosts = syncData.hosts || [];
@@ -852,8 +882,29 @@ HTML_TEMPLATE = '''
                 method: 'POST'
             });
             const data = await res.json();
-            hosts = data.hosts || [];
-            logs = data.logs || [];
+            const serverHosts = data.hosts || [];
+            
+            if (isHostsClean(serverHosts) && hasCustomHosts(hosts)) {
+                // O servidor resetou ou perdeu os dados, mas o cliente tem dados customizados em memória.
+                // Re-sincroniza com o servidor para restaurar seu banco de dados
+                const syncRes = await fetch('/api/hosts/sync', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({ hosts: hosts, logs: logs, deleted_hosts: deleted_hosts })
+                });
+                const syncData = await syncRes.json();
+                hosts = syncData.hosts || [];
+                logs = syncData.logs || [];
+                if (syncData.deleted_hosts) {
+                    deleted_hosts = syncData.deleted_hosts;
+                }
+            } else {
+                hosts = serverHosts;
+                logs = data.logs || [];
+                if (data.deleted_hosts) {
+                    deleted_hosts = data.deleted_hosts;
+                }
+            }
             render();
         } catch (e) {
             console.error("Erro ao executar checkAll:", e);
