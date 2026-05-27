@@ -654,8 +654,18 @@ HTML_TEMPLATE = '''
                     <!-- JS -->
                 </div>
             </div>
-            <div class="modal-footer border-top">
-                <button type="button" class="btn btn-secondary btn-sm" data-bs-dismiss="modal">Fechar</button>
+            <div class="modal-footer border-top d-flex justify-content-between align-items-center">
+                <div class="dropdown">
+                    <button class="btn btn-outline-primary btn-sm dropdown-toggle d-flex align-items-center" type="button" id="shareDropdown" data-bs-toggle="dropdown" aria-expanded="false" style="border-radius: 6px;">
+                        <i class="bi bi-share me-1"></i> Compartilhar
+                    </button>
+                    <ul class="dropdown-menu dropdown-menu-start shadow-sm" aria-labelledby="shareDropdown" style="font-size: 0.85rem; border-radius: 8px;">
+                        <li><a class="dropdown-item d-flex align-items-center" href="#" onclick="shareHistory('whatsapp')"><i class="bi bi-whatsapp text-success me-2 fs-5"></i> WhatsApp</a></li>
+                        <li><a class="dropdown-item d-flex align-items-center" href="#" onclick="shareHistory('telegram')"><i class="bi bi-telegram text-info me-2 fs-5"></i> Telegram</a></li>
+                        <li><a class="dropdown-item d-flex align-items-center" href="#" onclick="shareHistory('email')"><i class="bi bi-envelope text-danger me-2 fs-5"></i> E-mail</a></li>
+                    </ul>
+                </div>
+                <button type="button" class="btn btn-secondary btn-sm" data-bs-dismiss="modal" style="border-radius: 6px;">Fechar</button>
             </div>
         </div>
     </div>
@@ -949,6 +959,84 @@ HTML_TEMPLATE = '''
             `;
         }
         modal.show();
+    }
+
+    function shareHistory(platform) {
+        const now = Date.now();
+        const thirtyDaysMs = 30 * 24 * 60 * 60 * 1000;
+        
+        const filteredLogs = logs.filter(l => {
+            return (now - (l.timestamp || now)) <= thirtyDaysMs;
+        });
+        
+        if (filteredLogs.length === 0) {
+            alert("Não há registros de perdas nos últimos 30 dias para compartilhar.");
+            return;
+        }
+
+        const max_records = 50;
+        const total_records = filteredLogs.length;
+        const records_to_share = filteredLogs.slice(0, max_records);
+        
+        if (platform === 'whatsapp') {
+            let text = "📋 *Monitoramento PRODED - Relatório de Perdas (Últimos 30 Dias)*\\n\\n";
+            text += `*Gerado em:* ${new Date().toLocaleString('pt-BR')}\\n\\n`;
+            
+            records_to_share.forEach(l => {
+                let msg = `O host *${maskIp(l.label)}* (${maskIp(l.ip)}) ficou *OFFLINE*`;
+                if (l.type === 'high_latency') {
+                    msg = `O host *${maskIp(l.label)}* (${maskIp(l.ip)}) registrou latência alta de *${l.latency}ms*`;
+                }
+                text += `• ${l.time} - ${msg}\\n`;
+            });
+            
+            if (total_records > max_records) {
+                text += `\\n... e mais ${total_records - max_records} registros.\\n`;
+            }
+            text += "\\n_Gerado pelo Monitor de Hosts - PRODED_";
+            
+            const url = "https://api.whatsapp.com/send?text=" + encodeURIComponent(text);
+            window.open(url, '_blank');
+        } else if (platform === 'telegram') {
+            let text = "📋 *Monitoramento PRODED - Relatório de Perdas (Últimos 30 Dias)*\\n\\n";
+            text += `*Gerado em:* ${new Date().toLocaleString('pt-BR')}\\n\\n`;
+            
+            records_to_share.forEach(l => {
+                let msg = `O host *${maskIp(l.label)}* (${maskIp(l.ip)}) ficou *OFFLINE*`;
+                if (l.type === 'high_latency') {
+                    msg = `O host *${maskIp(l.label)}* (${maskIp(l.ip)}) registrou latência alta de *${l.latency}ms*`;
+                }
+                text += `• ${l.time} - ${msg}\\n`;
+            });
+            
+            if (total_records > max_records) {
+                text += `\\n... e mais ${total_records - max_records} registros.\\n`;
+            }
+            text += "\\n_Gerado pelo Monitor de Hosts - PRODED_";
+            
+            const url = "https://t.me/share/url?url=&text=" + encodeURIComponent(text);
+            window.open(url, '_blank');
+        } else if (platform === 'email') {
+            let subject = "Relatório de Monitoramento PRODED - Últimos 30 Dias";
+            let text = "Monitoramento PRODED - Relatório de Perdas (Últimos 30 dias)\\n\\n";
+            text += `Gerado em: ${new Date().toLocaleString('pt-BR')}\\n\\n`;
+            
+            records_to_share.forEach(l => {
+                let msg = `O host ${maskIp(l.label)} (${maskIp(l.ip)}) ficou OFFLINE`;
+                if (l.type === 'high_latency') {
+                    msg = `O host ${maskIp(l.label)} (${maskIp(l.ip)}) registrou latência alta de ${l.latency}ms`;
+                }
+                text += `• ${l.time} - ${msg}\\n`;
+            });
+            
+            if (total_records > max_records) {
+                text += `\\n... e mais ${total_records - max_records} registros.\\n`;
+            }
+            text += "\\nGerado pelo Monitor de Hosts - PRODED";
+            
+            const url = `mailto:?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(text)}`;
+            window.location.href = url;
+        }
     }
 
     function initChart(host, type) {
