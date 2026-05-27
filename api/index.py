@@ -980,59 +980,74 @@ HTML_TEMPLATE = '''
         
         if (platform === 'whatsapp') {
             let text = "📋 *Monitoramento PRODED - Relatório de Perdas (Últimos 30 Dias)*\\n\\n";
-            text += `*Gerado em:* ${new Date().toLocaleString('pt-BR')}\\n\\n`;
+            text += `*Gerado em:* ${new Date().toLocaleString('pt-BR')}\\n`;
+            text += "📌 ═════════════════════════════ 📌\\n\\n";
             
-            records_to_share.forEach(l => {
+            records_to_share.forEach((l, index) => {
                 let msg = `O host *${maskIp(l.label)}* (${maskIp(l.ip)}) ficou *OFFLINE*`;
                 if (l.type === 'high_latency') {
                     msg = `O host *${maskIp(l.label)}* (${maskIp(l.ip)}) registrou latência alta de *${l.latency}ms*`;
                 }
-                text += `• ${l.time} - ${msg}\\n`;
+                text += `⏰ *Hora:* ${l.time}\\n⚠️ *Evento:* ${msg}\\n`;
+                if (index < records_to_share.length - 1) {
+                    text += "─────────────────────────────\\n";
+                }
             });
             
+            text += "═════════════════════════════\\n\\n";
             if (total_records > max_records) {
-                text += `\\n... e mais ${total_records - max_records} registros.\\n`;
+                text += `⚠️ ... e mais ${total_records - max_records} registros não exibidos por limite de envio.\\n\\n`;
             }
-            text += "\\n_Gerado pelo Monitor de Hosts - PRODED_";
+            text += "_Gerado pelo Monitor de Hosts - PRODED_";
             
             const url = "https://api.whatsapp.com/send?text=" + encodeURIComponent(text);
             window.open(url, '_blank');
         } else if (platform === 'telegram') {
             let text = "📋 *Monitoramento PRODED - Relatório de Perdas (Últimos 30 Dias)*\\n\\n";
-            text += `*Gerado em:* ${new Date().toLocaleString('pt-BR')}\\n\\n`;
+            text += `*Gerado em:* ${new Date().toLocaleString('pt-BR')}\\n`;
+            text += "📌 ═════════════════════════════ 📌\\n\\n";
             
-            records_to_share.forEach(l => {
+            records_to_share.forEach((l, index) => {
                 let msg = `O host *${maskIp(l.label)}* (${maskIp(l.ip)}) ficou *OFFLINE*`;
                 if (l.type === 'high_latency') {
                     msg = `O host *${maskIp(l.label)}* (${maskIp(l.ip)}) registrou latência alta de *${l.latency}ms*`;
                 }
-                text += `• ${l.time} - ${msg}\\n`;
+                text += `⏰ *Hora:* ${l.time}\\n⚠️ *Evento:* ${msg}\\n`;
+                if (index < records_to_share.length - 1) {
+                    text += "─────────────────────────────\\n";
+                }
             });
             
+            text += "═════════════════════════════\\n\\n";
             if (total_records > max_records) {
-                text += `\\n... e mais ${total_records - max_records} registros.\\n`;
+                text += `⚠️ ... e mais ${total_records - max_records} registros não exibidos por limite de envio.\\n\\n`;
             }
-            text += "\\n_Gerado pelo Monitor de Hosts - PRODED_";
+            text += "_Gerado pelo Monitor de Hosts - PRODED_";
             
             const url = "https://t.me/share/url?url=&text=" + encodeURIComponent(text);
             window.open(url, '_blank');
         } else if (platform === 'email') {
             let subject = "Relatório de Monitoramento PRODED - Últimos 30 Dias";
             let text = "Monitoramento PRODED - Relatório de Perdas (Últimos 30 dias)\\n\\n";
-            text += `Gerado em: ${new Date().toLocaleString('pt-BR')}\\n\\n`;
+            text += `Gerado em: ${new Date().toLocaleString('pt-BR')}\\n`;
+            text += "========================================================\\n\\n";
             
-            records_to_share.forEach(l => {
+            records_to_share.forEach((l, index) => {
                 let msg = `O host ${maskIp(l.label)} (${maskIp(l.ip)}) ficou OFFLINE`;
                 if (l.type === 'high_latency') {
                     msg = `O host ${maskIp(l.label)} (${maskIp(l.ip)}) registrou latência alta de ${l.latency}ms`;
                 }
-                text += `• ${l.time} - ${msg}\\n`;
+                text += `Hora: ${l.time}\\nEvento: ${msg}\\n`;
+                if (index < records_to_share.length - 1) {
+                    text += "--------------------------------------------------------\\n";
+                }
             });
             
+            text += "========================================================\\n\\n";
             if (total_records > max_records) {
-                text += `\\n... e mais ${total_records - max_records} registros.\\n`;
+                text += `... e mais ${total_records - max_records} registros não exibidos por limite.\\n\\n`;
             }
-            text += "\\nGerado pelo Monitor de Hosts - PRODED";
+            text += "Gerado pelo Monitor de Hosts - PRODED";
             
             const url = `mailto:?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(text)}`;
             window.location.href = url;
